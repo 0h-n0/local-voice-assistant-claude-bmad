@@ -45,7 +45,7 @@ development_status:
   1-1-monorepo-structure-init: done
   1-2-backend-foundation-setup: done
   1-3-frontend-foundation-setup: done
-  1-4-integrated-dev-environment: backlog
+  1-4-integrated-dev-environment: review
   epic-1-retrospective: optional
 
   # Epic 2: リアルタイム音声対話 (MVP核心)

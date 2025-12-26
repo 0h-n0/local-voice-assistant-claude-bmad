@@ -1,0 +1,81 @@
+# ===================
+# Python
+# ===================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+.eggs/
+*.egg-info/
+*.egg
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# ===================
+# Node.js / Frontend
+# ===================
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+
+# ===================
+# Environment & Config
+# ===================
+.env
+.env.*
+!.env.example
+config/config.yaml
+!config/config.example.yaml
+
+# ===================
+# Data & Logs
+# ===================
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+logs/*.jsonl
+logs/*.log
+*.log
+
+# ===================
+# IDE & Editor
+# ===================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ===================
+# Build & Cache
+# ===================
+*.cache
+.cache/
+*.tmp
+*.temp
+
+# ===================
+# Models (large files)
+# ===================
+*.onnx
+*.pt
+*.pth
+*.bin
+models/

@@ -1,0 +1,58 @@
+# ===========================================
+# Local Voice Assistant Configuration
+# ===========================================
+# Copy this file to config.yaml and customize
+
+# LLM設定
+llm:
+  # プロバイダー: ollama, openai, groq
+  provider: ollama
+  # モデル名
+  model: qwen2.5:7b
+  # API Base URL (OpenAI互換)
+  base_url: http://localhost:11434/v1
+  # API Key (クラウドプロバイダー用)
+  api_key: ""
+  # レート制限 (requests per minute)
+  rate_limit_rpm: 60
+
+# STT設定 (音声認識)
+stt:
+  # モデル: reazon-nemo-v2
+  model: reazon-nemo-v2
+  # デバイス: cuda, cpu, auto
+  device: auto
+
+# TTS設定 (音声合成)
+tts:
+  # モデル: style-bert-vits2
+  model: style-bert-vits2
+  # デバイス: cuda, cpu, auto
+  device: auto
+  # 話者ID
+  speaker_id: 0
+
+# サーバー設定
+server:
+  host: "0.0.0.0"
+  port: 8000
+  # CORS許可オリジン
+  cors_origins:
+    - "http://localhost:3000"
+  # WebSocket設定
+  ws_ping_interval: 30
+  ws_ping_timeout: 10
+
+# ログ設定
+logging:
+  # レベル: DEBUG, INFO, WARNING, ERROR
+  level: INFO
+  # 評価ログ出力パス
+  eval_log_path: logs/eval.jsonl
+  # 構造化ログ形式: json, console
+  format: json
+
+# データベース設定
+database:
+  # SQLite DB パス
+  path: data/voice_assistant.db

@@ -43,7 +43,7 @@ development_status:
   # Epic 1: プロジェクト基盤構築
   epic-1: in-progress
   1-1-monorepo-structure-init: done
-  1-2-backend-foundation-setup: backlog
+  1-2-backend-foundation-setup: done
   1-3-frontend-foundation-setup: backlog
   1-4-integrated-dev-environment: backlog
   epic-1-retrospective: optional

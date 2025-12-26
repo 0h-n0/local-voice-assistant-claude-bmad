@@ -108,67 +108,114 @@ packages = ["src/voice_assistant"]
 
 **main.py エントリーポイント:**
 ```python
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from voice_assistant.core.config import settings
+from voice_assistant.core.logging import configure_logging
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    configure_logging()
+    yield
+
 app = FastAPI(
     title="Voice Assistant API",
+    description="日本語特化ローカル音声対話アシスタント",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
 )
 
 @app.get("/api/v1/health")
-async def health_check():
+async def health_check() -> dict[str, str]:
     return {"status": "ok"}
 ```
 
 **config.py 設定管理:**
 ```python
-from pydantic_settings import BaseSettings
+from functools import lru_cache
 from pathlib import Path
+from typing import Literal
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
 class Settings(BaseSettings):
-    # Server
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_prefix="VOICE_ASSISTANT_",
+        extra="ignore",
+    )
+
     host: str = "0.0.0.0"
     port: int = 8000
     cors_origins: list[str] = ["http://localhost:3000"]
-
-    # Logging
     log_level: str = "INFO"
     eval_log_path: Path = Path("logs/eval.jsonl")
 
-    class Config:
-        env_file = ".env"
-        env_prefix = "VOICE_ASSISTANT_"
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, v: str) -> LogLevel:
+        upper_v = v.upper()
+        if upper_v not in VALID_LOG_LEVELS:
+            return "INFO"
+        return upper_v  # type: ignore[return-value]
 
-settings = Settings()
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+settings = get_settings()
 ```
 
 **logging.py structlog設定:**
 ```python
+import logging
+import sys
+
 import structlog
+
 from voice_assistant.core.config import settings
 
-def configure_logging():
+def configure_logging() -> None:
+    logging.basicConfig(
+        format="%(message)s",
+        stream=sys.stdout,
+        level=getattr(logging, settings.log_level.upper()),
+    )
+
     structlog.configure(
         processors=[
             structlog.stdlib.filter_by_level,
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
             structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.JSONRenderer()
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.processors.JSONRenderer(),
         ],
         wrapper_class=structlog.stdlib.BoundLogger,
         context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
     )
+
+def get_logger(name: str) -> structlog.stdlib.BoundLogger:
+    return structlog.get_logger(name)
 ```
 
 ### 命名規則（Architecture準拠）

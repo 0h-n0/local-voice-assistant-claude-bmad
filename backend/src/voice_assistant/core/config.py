@@ -31,12 +31,12 @@ class Settings(BaseSettings):
 
     @field_validator("log_level")
     @classmethod
-    def validate_log_level(cls, v: str) -> str:
+    def validate_log_level(cls, v: str) -> LogLevel:
         """Validate log level, fallback to INFO if invalid."""
         upper_v = v.upper()
         if upper_v not in VALID_LOG_LEVELS:
             return "INFO"
-        return upper_v
+        return upper_v  # type: ignore[return-value]
 
 
 @lru_cache

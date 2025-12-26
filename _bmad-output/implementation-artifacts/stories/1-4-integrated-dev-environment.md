@@ -59,7 +59,7 @@ dev-backend:
 	cd backend && uv run uvicorn voice_assistant.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-**Architecture.md準拠のMakefile例:**
+**Architecture.md記載のMakefile例:**
 ```makefile
 .PHONY: dev dev-frontend dev-backend
 
@@ -72,6 +72,15 @@ dev-frontend:
 dev-backend:
 	cd backend && uv run uvicorn voice_assistant.main:app --reload
 ```
+
+**現在の構成とArchitecture.mdの差異:**
+| 項目 | 現在の実装 | Architecture.md例 | 理由 |
+|------|-----------|------------------|------|
+| `--host 0.0.0.0` | あり | なし | LAN内の他デバイスからアクセス可能にするため（開発時便利） |
+| `--port 8000` | 明示 | 暗黙（デフォルト） | 明示的な指定で混乱を防ぐ |
+| `@echo` | あり | なし | 起動時のフィードバック表示 |
+
+→ **結論**: 現在の構成はArchitecture.mdの意図に沿っており、開発利便性のための追加オプションのみ。変更不要。
 
 ### 技術仕様
 
@@ -190,5 +199,6 @@ N/A
 
 ## Change Log
 
+- 2025-12-27: Code review修正 - Makefile構成差異の説明テーブル追加
 - 2025-12-27: Story 1.4 実装完了 - 統合開発環境（全3タスク完了、既存設定の動作確認のみ）
 - 2025-12-27: Story 1.4 created via create-story workflow

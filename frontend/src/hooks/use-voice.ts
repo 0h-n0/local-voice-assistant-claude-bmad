@@ -27,7 +27,8 @@ export function useVoice(): UseVoiceResult {
   const vad = useMicVAD({
     startOnLoad: false,
     baseAssetPath: "/",
-    model: "v5",
+    onnxWASMBasePath: "/",
+    model: "legacy",
     onSpeechStart: () => {
       setRecordingState("recording");
       if (wsClient) {
@@ -101,12 +102,13 @@ export function useVoice(): UseVoiceResult {
   }, [connectionState, vad]);
 
   // Cleanup on unmount - ensures VAD is paused (React Strict Mode safety)
+  // Note: Empty deps array is intentional - we only want this to run on unmount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     return () => {
       vad.pause();
-      setRecordingState("idle");
     };
-  }, [vad, setRecordingState]);
+  }, []);
 
   return {
     recordingState,

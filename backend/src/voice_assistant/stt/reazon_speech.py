@@ -3,6 +3,25 @@
 import asyncio
 import time
 
+# Workaround for ml_dtypes compatibility issue (see Issue #16)
+# nemo-toolkit expects float4/float8 types which are only in ml_dtypes >= 0.5.0
+# but reazonspeech requires numpy < 2 which conflicts with ml_dtypes >= 0.5.0
+# https://github.com/0h-n0/local-voice-assistant-claude-bmad/issues/16
+import ml_dtypes
+_missing_types = [
+    'float4_e2m1fn',
+    'float8_e8m0fnu',
+    'float8_e4m3',
+    'float8_e4m3fn',
+    'float8_e4m3fnuz',
+    'float8_e4m3b11fnuz',
+    'float8_e5m2',
+    'float8_e5m2fnuz',
+]
+for _dtype in _missing_types:
+    if not hasattr(ml_dtypes, _dtype):
+        setattr(ml_dtypes, _dtype, type(_dtype, (), {}))
+
 import numpy as np
 import torch
 
@@ -90,9 +109,9 @@ class ReazonSpeechSTT(BaseSTT):
 
         start_time = time.perf_counter()
 
-        from reazonspeech.nemo.asr import AudioData, transcribe
+        from reazonspeech.nemo.asr import audio_from_numpy, transcribe
 
-        audio = AudioData(audio_array, sample_rate)
+        audio = audio_from_numpy(audio_array, sample_rate)
 
         result = await asyncio.to_thread(transcribe, self._model, audio)
 

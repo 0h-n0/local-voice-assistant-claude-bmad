@@ -83,3 +83,7 @@ models/
 # VAD model files (small, required for frontend)
 !frontend/public/silero_vad.onnx
 !frontend/public/silero_vad_legacy.onnx
+
+# ONNX Runtime WASM files (copied via postinstall from node_modules)
+frontend/public/ort-wasm-*.wasm
+frontend/public/ort-wasm-*.mjs

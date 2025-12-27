@@ -9,6 +9,7 @@ import {
 } from "@/core/websocket-client";
 import { RecordingState, parseServerEvent } from "@/core/events";
 import { getAudioPlayer } from "@/core/audio-player";
+import { fetchConversation, type MessageResponse } from "@/lib/api-client";
 
 // WebSocket URL - configurable via environment variable
 const getWebSocketUrl = (): string => {
@@ -58,6 +59,12 @@ interface VoiceStore {
   ttsState: TtsState;
   ttsLatencyMs: number | null;
 
+  // Conversation selection state (Story 3.4)
+  selectedConversationId: string | null;
+  historicalMessages: MessageResponse[];
+  isLoadingConversation: boolean;
+  conversationError: string | null;
+
   // Actions
   connect: () => void;
   disconnect: () => void;
@@ -66,6 +73,8 @@ interface VoiceStore {
   clearSttResults: () => void;
   clearLlmResults: () => void;
   stopTts: () => void;
+  selectConversation: (id: string) => Promise<void>;
+  clearSelection: () => void;
 }
 
 export const useVoiceStore = create<VoiceStore>((set, get) => ({
@@ -85,6 +94,12 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
   // TTS initial state (Story 2.5)
   ttsState: "idle",
   ttsLatencyMs: null,
+
+  // Conversation selection initial state (Story 3.4)
+  selectedConversationId: null,
+  historicalMessages: [],
+  isLoadingConversation: false,
+  conversationError: null,
 
   // Actions
   setConnectionState: (state: ConnectionState) => {
@@ -229,5 +244,43 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
       client.disconnect();
     }
     set({ wsClient: null, connectionState: "disconnected" });
+  },
+
+  // Conversation selection actions (Story 3.4)
+  selectConversation: async (id: string) => {
+    set({
+      selectedConversationId: id,
+      isLoadingConversation: true,
+      conversationError: null,
+      // Clear real-time messages when switching to historical view
+      sttResults: [],
+      llmResults: [],
+      llmStreamingText: "",
+      partialText: "",
+    });
+
+    try {
+      const conversation = await fetchConversation(id);
+      set({
+        historicalMessages: conversation.messages,
+        isLoadingConversation: false,
+      });
+    } catch (error) {
+      set({
+        conversationError:
+          error instanceof Error ? error.message : "会話の読み込みに失敗しました",
+        isLoadingConversation: false,
+        historicalMessages: [],
+      });
+    }
+  },
+
+  clearSelection: () => {
+    set({
+      selectedConversationId: null,
+      historicalMessages: [],
+      isLoadingConversation: false,
+      conversationError: null,
+    });
   },
 }));

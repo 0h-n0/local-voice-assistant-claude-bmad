@@ -51,7 +51,7 @@ development_status:
   # Epic 2: リアルタイム音声対話 (MVP核心)
   epic-2: in-progress
   2-1-websocket-foundation: done
-  2-2-frontend-audio-capture-vad: backlog
+  2-2-frontend-audio-capture-vad: review
   2-3-stt-integration-reazonspeech: backlog
   2-4-llm-integration-openai-compatible: backlog
   2-5-tts-integration-style-bert-vits2: backlog

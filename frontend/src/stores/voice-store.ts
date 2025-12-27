@@ -7,6 +7,7 @@ import {
   ConnectionState,
   WebSocketClient,
 } from "@/core/websocket-client";
+import { RecordingState } from "@/core/events";
 
 // WebSocket URL - configurable via environment variable
 const getWebSocketUrl = (): string => {
@@ -18,22 +19,29 @@ const getWebSocketUrl = (): string => {
 interface VoiceStore {
   // State
   connectionState: ConnectionState;
+  recordingState: RecordingState;
   wsClient: WebSocketClient | null;
 
   // Actions
   connect: () => void;
   disconnect: () => void;
   setConnectionState: (state: ConnectionState) => void;
+  setRecordingState: (state: RecordingState) => void;
 }
 
 export const useVoiceStore = create<VoiceStore>((set, get) => ({
   // Initial state
   connectionState: "disconnected",
+  recordingState: "idle",
   wsClient: null,
 
   // Actions
   setConnectionState: (state: ConnectionState) => {
     set({ connectionState: state });
+  },
+
+  setRecordingState: (state: RecordingState) => {
+    set({ recordingState: state });
   },
 
   connect: () => {
@@ -54,12 +62,13 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
       onStateChange: (state: ConnectionState) => {
         set({ connectionState: state });
       },
-      onMessage: (_data: unknown) => {
-        // Message handling will be added in Story 2.2+
+      onMessage: () => {
+        // Message handling will be added in Story 2.3+
         // Events: stt.partial, stt.final, llm.start, llm.delta, llm.end, tts.chunk, tts.end, error
       },
-      onError: (error: Event) => {
-        console.error("WebSocket error:", error);
+      onError: () => {
+        // WebSocket errors trigger onclose which handles cleanup
+        // Error details are logged at the WebSocket layer if needed
       },
     });
 

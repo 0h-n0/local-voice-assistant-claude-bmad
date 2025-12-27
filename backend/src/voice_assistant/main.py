@@ -231,3 +231,32 @@ async def get_conversation(conversation_id: str) -> ConversationResponse:
                 for msg in messages
             ],
         )
+
+
+class DeleteResponse(BaseModel):
+    """Response model for delete operations."""
+
+    deleted: bool
+
+
+@app.delete("/api/v1/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str) -> DeleteResponse:
+    """Delete a conversation and all its messages.
+
+    Args:
+        conversation_id: The conversation ID to delete
+
+    Returns:
+        DeleteResponse indicating success
+
+    Raises:
+        HTTPException: 404 if conversation not found
+    """
+    engine = get_engine()
+    with Session(engine) as session:
+        repo = ConversationRepository(session)
+        deleted = repo.delete(conversation_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        logger.info("conversation_deleted", conversation_id=conversation_id)
+        return DeleteResponse(deleted=True)

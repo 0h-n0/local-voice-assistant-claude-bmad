@@ -254,3 +254,60 @@ class TestListConversations:
         assert data["data"] == []
         assert data["meta"]["total"] == 1  # sample_conversation exists
         assert data["meta"]["offset"] == 100
+
+
+class TestDeleteConversation:
+    """Tests for DELETE /api/v1/conversations/{conversation_id}."""
+
+    def test_returns_404_for_nonexistent_conversation(self, client):
+        """Should return 404 when conversation doesn't exist."""
+        response = client.delete("/api/v1/conversations/nonexistent-id")
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Conversation not found"
+
+    def test_deletes_conversation(self, client, sample_conversation):
+        """Should delete the specified conversation."""
+        # Verify conversation exists
+        response = client.get(f"/api/v1/conversations/{sample_conversation}")
+        assert response.status_code == 200
+
+        # Delete it
+        response = client.delete(f"/api/v1/conversations/{sample_conversation}")
+        assert response.status_code == 200
+        assert response.json()["deleted"] is True
+
+        # Verify it's gone
+        response = client.get(f"/api/v1/conversations/{sample_conversation}")
+        assert response.status_code == 404
+
+    def test_deletes_conversation_cascades_messages(self, client, sample_conversation):
+        """Should delete all messages when conversation is deleted."""
+        # Verify conversation has messages
+        response = client.get(f"/api/v1/conversations/{sample_conversation}")
+        assert response.status_code == 200
+        assert len(response.json()["messages"]) == 2
+
+        # Delete it
+        response = client.delete(f"/api/v1/conversations/{sample_conversation}")
+        assert response.status_code == 200
+
+        # Verify conversation is gone
+        response = client.get(f"/api/v1/conversations/{sample_conversation}")
+        assert response.status_code == 404
+
+    def test_delete_updates_list(self, client, sample_conversation):
+        """Should remove conversation from list after deletion."""
+        # Verify conversation is in list
+        response = client.get("/api/v1/conversations")
+        assert response.status_code == 200
+        assert response.json()["meta"]["total"] == 1
+
+        # Delete it
+        response = client.delete(f"/api/v1/conversations/{sample_conversation}")
+        assert response.status_code == 200
+
+        # Verify list is empty
+        response = client.get("/api/v1/conversations")
+        assert response.status_code == 200
+        assert response.json()["meta"]["total"] == 0
+        assert response.json()["data"] == []

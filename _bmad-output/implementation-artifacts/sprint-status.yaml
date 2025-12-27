@@ -60,12 +60,12 @@ development_status:
   epic-2-retrospective: optional
 
   # Epic 3: 会話体験の完成
-  epic-3: in-progress
+  epic-3: done
   3-1-conversation-history-scroll: done
   3-2-conversation-history-db-persistence: done
   3-3-conversation-list-api: done
   3-4-conversation-detail-view: done
-  3-5-conversation-history-delete: backlog
+  3-5-conversation-history-delete: done
   epic-3-retrospective: optional
 
   # Epic 4: 設定とカスタマイズ

@@ -3,6 +3,9 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+# Default sample rate for TTS audio output
+TTS_SAMPLE_RATE = 44100
+
 
 @dataclass
 class TTSResult:

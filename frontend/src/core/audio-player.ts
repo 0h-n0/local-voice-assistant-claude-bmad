@@ -3,6 +3,12 @@
  * Story 2.5: TTS Integration
  */
 
+/** Default sample rate for audio playback */
+export const AUDIO_SAMPLE_RATE = 44100;
+
+/** Maximum number of audio chunks in the queue to prevent memory issues */
+const MAX_QUEUE_SIZE = 50;
+
 export class AudioPlayer {
   private audioContext: AudioContext | null = null;
   private audioQueue: AudioBuffer[] = [];
@@ -16,7 +22,7 @@ export class AudioPlayer {
    */
   private getAudioContext(): AudioContext {
     if (!this.audioContext) {
-      this.audioContext = new AudioContext({ sampleRate: 44100 });
+      this.audioContext = new AudioContext({ sampleRate: AUDIO_SAMPLE_RATE });
     }
     return this.audioContext;
   }
@@ -59,10 +65,17 @@ export class AudioPlayer {
   }
 
   /**
-   * Add audio chunk to queue and start playback if not already playing
+   * Add audio chunk to queue and start playback if not already playing.
+   * If queue exceeds MAX_QUEUE_SIZE, oldest buffers are removed.
    */
   async enqueue(base64Audio: string, sampleRate: number): Promise<void> {
     const buffer = await this.decodeBase64Audio(base64Audio, sampleRate);
+
+    // Prevent unbounded queue growth
+    while (this.audioQueue.length >= MAX_QUEUE_SIZE) {
+      this.audioQueue.shift();
+    }
+
     this.audioQueue.push(buffer);
 
     if (!this.isPlaying) {
@@ -163,4 +176,15 @@ export function getAudioPlayer(): AudioPlayer {
     audioPlayerInstance = new AudioPlayer();
   }
   return audioPlayerInstance;
+}
+
+/**
+ * Reset the global AudioPlayer instance.
+ * Useful for testing or when a fresh instance is needed.
+ */
+export function resetAudioPlayer(): void {
+  if (audioPlayerInstance) {
+    audioPlayerInstance.stop();
+    audioPlayerInstance = null;
+  }
 }

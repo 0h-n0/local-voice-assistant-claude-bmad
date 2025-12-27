@@ -10,7 +10,7 @@ import numpy as np
 import torch
 
 from voice_assistant.core.logging import get_logger
-from voice_assistant.tts.base import BaseTTS, TTSResult
+from voice_assistant.tts.base import TTS_SAMPLE_RATE, BaseTTS, TTSResult
 
 logger = get_logger(__name__)
 
@@ -189,15 +189,19 @@ class StyleBertVits2TTS(BaseTTS):
             Returns empty audio if model is unavailable.
         """
         if not text or not text.strip():
-            return TTSResult(audio=b"", sample_rate=44100, latency_ms=0.0)
+            return TTSResult(audio=b"", sample_rate=TTS_SAMPLE_RATE, latency_ms=0.0)
 
         start_time = time.perf_counter()
 
         # Load model (lazy)
         model = self._load_model()
         if model is None:
-            # Model not available, return empty result
-            return TTSResult(audio=b"", sample_rate=44100, latency_ms=0.0)
+            # Model not available, return empty result with warning
+            logger.debug(
+                "tts_skipped_model_unavailable",
+                text_length=len(text),
+            )
+            return TTSResult(audio=b"", sample_rate=TTS_SAMPLE_RATE, latency_ms=0.0)
 
         # Run inference in thread pool (blocking operation)
         sample_rate, audio = await asyncio.to_thread(

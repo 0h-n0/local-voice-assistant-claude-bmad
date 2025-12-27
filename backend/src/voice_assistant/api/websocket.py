@@ -1,6 +1,7 @@
 """WebSocket endpoint for real-time voice chat"""
 
 import json
+import threading
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -12,17 +13,21 @@ from voice_assistant.stt import ReazonSpeechSTT, get_stt_device
 router = APIRouter()
 logger = get_logger(__name__)
 
-# Global STT service instance (lazy loaded)
+# Global STT service instance (lazy loaded, thread-safe)
 _stt_service: Optional[ReazonSpeechSTT] = None
+_stt_service_lock = threading.Lock()
 
 
 def get_stt_service() -> ReazonSpeechSTT:
-    """Get or create the global STT service instance."""
+    """Get or create the global STT service instance (thread-safe)."""
     global _stt_service
     if _stt_service is None:
-        device = get_stt_device()
-        logger.info("initializing_stt_service", device=device)
-        _stt_service = ReazonSpeechSTT(device=device)
+        with _stt_service_lock:
+            # Double-check locking pattern
+            if _stt_service is None:
+                device = get_stt_device()
+                logger.info("initializing_stt_service", device=device)
+                _stt_service = ReazonSpeechSTT(device=device)
     return _stt_service
 
 

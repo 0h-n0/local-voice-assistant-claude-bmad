@@ -7,7 +7,7 @@ import {
   ConnectionState,
   WebSocketClient,
 } from "@/core/websocket-client";
-import { RecordingState } from "@/core/events";
+import { RecordingState, parseServerEvent } from "@/core/events";
 
 // WebSocket URL - configurable via environment variable
 const getWebSocketUrl = (): string => {
@@ -16,17 +16,30 @@ const getWebSocketUrl = (): string => {
   return `${protocol}://${host}/api/v1/ws/chat`;
 };
 
+/** Represents a recognized text from STT */
+export interface SttResult {
+  text: string;
+  latency_ms: number;
+  timestamp: number;
+}
+
 interface VoiceStore {
   // State
   connectionState: ConnectionState;
   recordingState: RecordingState;
   wsClient: WebSocketClient | null;
 
+  // STT results
+  partialText: string;
+  sttResults: SttResult[];
+  lastError: { code: string; message: string } | null;
+
   // Actions
   connect: () => void;
   disconnect: () => void;
   setConnectionState: (state: ConnectionState) => void;
   setRecordingState: (state: RecordingState) => void;
+  clearSttResults: () => void;
 }
 
 export const useVoiceStore = create<VoiceStore>((set, get) => ({
@@ -34,6 +47,9 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
   connectionState: "disconnected",
   recordingState: "idle",
   wsClient: null,
+  partialText: "",
+  sttResults: [],
+  lastError: null,
 
   // Actions
   setConnectionState: (state: ConnectionState) => {
@@ -42,6 +58,10 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
 
   setRecordingState: (state: RecordingState) => {
     set({ recordingState: state });
+  },
+
+  clearSttResults: () => {
+    set({ sttResults: [], partialText: "", lastError: null });
   },
 
   connect: () => {
@@ -62,9 +82,38 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
       onStateChange: (state: ConnectionState) => {
         set({ connectionState: state });
       },
-      onMessage: () => {
-        // Message handling will be added in Story 2.3+
-        // Events: stt.partial, stt.final, llm.start, llm.delta, llm.end, tts.chunk, tts.end, error
+      onMessage: (data: unknown) => {
+        const event = parseServerEvent(data);
+        if (!event) return;
+
+        switch (event.type) {
+          case "stt.partial":
+            set({ partialText: event.text });
+            break;
+
+          case "stt.final":
+            set((state) => ({
+              partialText: "",
+              recordingState: "idle",
+              lastError: null, // Clear previous error on successful recognition
+              sttResults: [
+                ...state.sttResults,
+                {
+                  text: event.text,
+                  latency_ms: event.latency_ms,
+                  timestamp: Date.now(),
+                },
+              ],
+            }));
+            break;
+
+          case "error":
+            set({
+              lastError: { code: event.code, message: event.message },
+              recordingState: "idle",
+            });
+            break;
+        }
       },
       onError: () => {
         // WebSocket errors trigger onclose which handles cleanup

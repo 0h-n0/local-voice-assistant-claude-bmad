@@ -30,8 +30,72 @@ export interface CancelEvent {
 /** Union of all client-to-server events */
 export type ClientEvent = VadStartEvent | VadAudioEvent | VadEndEvent | CancelEvent;
 
+// ============================================
+// Server → Client Events
+// ============================================
+
+/** Partial STT recognition result (streaming, optional) */
+export interface SttPartialEvent {
+  type: "stt.partial";
+  text: string;
+}
+
+/** Final STT recognition result */
+export interface SttFinalEvent {
+  type: "stt.final";
+  text: string;
+  latency_ms: number;
+}
+
+/** Error event from server */
+export interface ErrorEvent {
+  type: "error";
+  code: string;
+  message: string;
+}
+
+/** Union of all server-to-client events */
+export type ServerEvent = SttPartialEvent | SttFinalEvent | ErrorEvent;
+
 /** Recording state for UI */
 export type RecordingState = "idle" | "recording" | "processing";
+
+/**
+ * Parse incoming server event from JSON
+ */
+export function parseServerEvent(data: unknown): ServerEvent | null {
+  if (typeof data !== "object" || data === null) {
+    return null;
+  }
+  const event = data as Record<string, unknown>;
+  const type = event.type;
+
+  if (type === "stt.partial" && typeof event.text === "string") {
+    return { type: "stt.partial", text: event.text };
+  }
+
+  if (
+    type === "stt.final" &&
+    typeof event.text === "string" &&
+    typeof event.latency_ms === "number"
+  ) {
+    return {
+      type: "stt.final",
+      text: event.text,
+      latency_ms: event.latency_ms,
+    };
+  }
+
+  if (
+    type === "error" &&
+    typeof event.code === "string" &&
+    typeof event.message === "string"
+  ) {
+    return { type: "error", code: event.code, message: event.message };
+  }
+
+  return null;
+}
 
 /**
  * Send a typed event through WebSocket

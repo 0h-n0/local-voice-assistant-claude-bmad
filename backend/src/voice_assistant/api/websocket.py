@@ -7,9 +7,23 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 from voice_assistant.core.logging import get_logger
+from voice_assistant.stt import ReazonSpeechSTT, get_stt_device
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+# Global STT service instance (lazy loaded)
+_stt_service: Optional[ReazonSpeechSTT] = None
+
+
+def get_stt_service() -> ReazonSpeechSTT:
+    """Get or create the global STT service instance."""
+    global _stt_service
+    if _stt_service is None:
+        device = get_stt_device()
+        logger.info("initializing_stt_service", device=device)
+        _stt_service = ReazonSpeechSTT(device=device)
+    return _stt_service
 
 
 class AudioBuffer:
@@ -28,6 +42,74 @@ class AudioBuffer:
 
     def clear(self) -> None:
         self.chunks = []
+
+    def has_audio(self) -> bool:
+        return len(self.chunks) > 0
+
+
+async def handle_vad_end(
+    websocket: WebSocket,
+    audio_buffer: AudioBuffer,
+    client_info: str,
+) -> None:
+    """Handle vad.end event by running STT and sending results.
+
+    Args:
+        websocket: The WebSocket connection.
+        audio_buffer: Buffer containing accumulated audio data.
+        client_info: Client identification string for logging.
+    """
+    if not audio_buffer.has_audio():
+        logger.debug("vad_end_no_audio", client=client_info)
+        return
+
+    audio_data = audio_buffer.get_audio()
+    sample_rate = audio_buffer.sample_rate
+
+    logger.info(
+        "stt_processing_start",
+        client=client_info,
+        audio_bytes=len(audio_data),
+        sample_rate=sample_rate,
+    )
+
+    try:
+        stt_service = get_stt_service()
+        result = await stt_service.transcribe(audio_data, sample_rate)
+
+        # Send stt.final event (stt.partial is not supported by ReazonSpeech)
+        await websocket.send_json(
+            {
+                "type": "stt.final",
+                "text": result.text,
+                "latency_ms": round(result.latency_ms, 2),
+            }
+        )
+
+        logger.info(
+            "stt_final_sent",
+            client=client_info,
+            text_length=len(result.text),
+            latency_ms=round(result.latency_ms, 2),
+        )
+
+    except Exception as e:
+        logger.error(
+            "stt_processing_error",
+            client=client_info,
+            error=str(e),
+        )
+        # Send error event to client
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": "STT_ERROR",
+                "message": "音声認識に失敗しました",
+            }
+        )
+
+    finally:
+        audio_buffer.clear()
 
 
 async def handle_text_message(
@@ -56,7 +138,8 @@ async def handle_text_message(
                 timestamp=event.get("timestamp"),
                 audio_chunks=len(audio_buffer.chunks),
             )
-            # Audio processing will be implemented in Story 2.3 (STT integration)
+            # Process audio with STT
+            await handle_vad_end(websocket, audio_buffer, client_info)
 
         elif event_type == "cancel":
             logger.info("cancel_received", client=client_info)

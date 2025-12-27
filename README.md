@@ -319,7 +319,13 @@ print(torch.cuda.is_available())
 
 ## ライセンス
 
-MIT License
+**AGPL-3.0 License**
+
+このプロジェクトは [Style-BERT-VITS2](https://github.com/litagin02/Style-Bert-VITS2) を使用しているため、AGPL-3.0 ライセンスが適用されます。
+
+- ソースコードの公開が必要
+- ネットワーク経由で使用する場合もソース公開が必要
+- 派生作品も AGPL-3.0 でライセンスする必要あり
 
 ## 謝辞
 

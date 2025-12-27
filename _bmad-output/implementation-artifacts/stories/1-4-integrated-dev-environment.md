@@ -1,6 +1,6 @@
 # Story 1.4: 統合開発環境
 
-Status: review
+Status: done
 
 ## Story
 

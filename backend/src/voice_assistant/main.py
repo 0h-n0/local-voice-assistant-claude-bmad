@@ -6,6 +6,7 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from voice_assistant.api.websocket import router as ws_router
 from voice_assistant.core.config import settings
 from voice_assistant.core.logging import configure_logging
 
@@ -36,6 +37,10 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
 )
+
+
+# Include WebSocket router
+app.include_router(ws_router)
 
 
 @app.get("/api/v1/health")

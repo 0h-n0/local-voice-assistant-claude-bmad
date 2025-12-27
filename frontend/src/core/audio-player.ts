@@ -72,8 +72,15 @@ export class AudioPlayer {
     const buffer = await this.decodeBase64Audio(base64Audio, sampleRate);
 
     // Prevent unbounded queue growth
+    let evictedCount = 0;
     while (this.audioQueue.length >= MAX_QUEUE_SIZE) {
       this.audioQueue.shift();
+      evictedCount++;
+    }
+    if (evictedCount > 0) {
+      console.warn(
+        `[AudioPlayer] Queue overflow: evicted ${evictedCount} buffer(s) to maintain MAX_QUEUE_SIZE=${MAX_QUEUE_SIZE}`
+      );
     }
 
     this.audioQueue.push(buffer);

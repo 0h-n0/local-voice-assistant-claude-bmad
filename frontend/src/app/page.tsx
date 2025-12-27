@@ -2,7 +2,7 @@
 
 import { VoiceInput } from "@/components/VoiceInput";
 import { useVoiceStore } from "@/stores/voice-store";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export default function Home() {
   const {
@@ -21,13 +21,72 @@ export default function Home() {
   } = useVoiceStore();
 
   const chatAreaRef = useRef<HTMLDivElement>(null);
+  const [isUserAtBottom, setIsUserAtBottom] = useState(true);
+  const scrollThrottleRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Check if scroll position is near the bottom (pure function, no memoization needed)
+  const isNearBottom = (element: HTMLElement, threshold = 100): boolean => {
+    return element.scrollHeight - element.scrollTop - element.clientHeight < threshold;
+  };
+
+  // Handle scroll events to track user position (throttled for performance - NFR-P5)
+  const handleScroll = useCallback(() => {
+    // Throttle scroll events to improve performance
+    if (scrollThrottleRef.current) return;
+
+    scrollThrottleRef.current = setTimeout(() => {
+      scrollThrottleRef.current = null;
+      if (chatAreaRef.current) {
+        setIsUserAtBottom(isNearBottom(chatAreaRef.current));
+      }
+    }, 100); // 100ms throttle
+  }, []);
+
+  // Scroll to bottom helper with smooth animation
+  const scrollToBottom = useCallback(() => {
+    if (chatAreaRef.current) {
+      chatAreaRef.current.scrollTo({
+        top: chatAreaRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+      setIsUserAtBottom(true);
+    }
+  }, []);
+
+  // Check actual scroll position on initial mount
   useEffect(() => {
     if (chatAreaRef.current) {
-      chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
+      setIsUserAtBottom(isNearBottom(chatAreaRef.current));
     }
-  }, [sttResults, llmResults, llmStreamingText, partialText]);
+  }, []);
+
+  // Auto-scroll to bottom when new messages arrive (only if user is at bottom)
+  useEffect(() => {
+    if (isUserAtBottom && chatAreaRef.current) {
+      chatAreaRef.current.scrollTo({
+        top: chatAreaRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [sttResults, llmResults, llmStreamingText, partialText, isUserAtBottom]);
+
+  // Handle window resize to maintain scroll position
+  useEffect(() => {
+    const handleResize = () => {
+      if (chatAreaRef.current) {
+        // Recalculate if user is at bottom after resize
+        const atBottom = isNearBottom(chatAreaRef.current);
+        setIsUserAtBottom(atBottom);
+        // If was at bottom, stay at bottom (instant scroll on resize for stability)
+        if (atBottom) {
+          chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
+        }
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const getStatusColor = () => {
     switch (connectionState) {
@@ -101,6 +160,7 @@ export default function Home() {
       {/* Chat Area */}
       <main
         ref={chatAreaRef}
+        onScroll={handleScroll}
         className="flex-1 overflow-y-auto px-4 py-6"
       >
         <div className="max-w-4xl mx-auto space-y-4">
@@ -178,6 +238,19 @@ export default function Home() {
           )}
         </div>
       </main>
+
+      {/* Scroll to Bottom Button */}
+      {!isUserAtBottom && messages.length > 0 && (
+        <button
+          onClick={scrollToBottom}
+          className="fixed bottom-24 right-6 w-10 h-10 bg-blue-500 text-white rounded-full shadow-lg hover:bg-blue-600 transition-colors flex items-center justify-center z-10"
+          aria-label="最新メッセージへスクロール"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+          </svg>
+        </button>
+      )}
 
       {/* Footer */}
       <footer className="flex-shrink-0 bg-white border-t border-gray-200 px-4 py-4">

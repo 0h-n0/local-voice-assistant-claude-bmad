@@ -23,6 +23,17 @@ export interface SttResult {
   timestamp: number;
 }
 
+/** Represents an LLM response (Story 2.4) */
+export interface LlmResult {
+  text: string;
+  latency_ms: number;
+  ttft_ms: number;
+  timestamp: number;
+}
+
+/** Processing state for LLM (Story 2.4) */
+export type LlmState = "idle" | "processing" | "streaming";
+
 interface VoiceStore {
   // State
   connectionState: ConnectionState;
@@ -34,12 +45,18 @@ interface VoiceStore {
   sttResults: SttResult[];
   lastError: { code: string; message: string } | null;
 
+  // LLM state (Story 2.4)
+  llmState: LlmState;
+  llmStreamingText: string;
+  llmResults: LlmResult[];
+
   // Actions
   connect: () => void;
   disconnect: () => void;
   setConnectionState: (state: ConnectionState) => void;
   setRecordingState: (state: RecordingState) => void;
   clearSttResults: () => void;
+  clearLlmResults: () => void;
 }
 
 export const useVoiceStore = create<VoiceStore>((set, get) => ({
@@ -50,6 +67,11 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
   partialText: "",
   sttResults: [],
   lastError: null,
+
+  // LLM initial state (Story 2.4)
+  llmState: "idle",
+  llmStreamingText: "",
+  llmResults: [],
 
   // Actions
   setConnectionState: (state: ConnectionState) => {
@@ -62,6 +84,10 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
 
   clearSttResults: () => {
     set({ sttResults: [], partialText: "", lastError: null });
+  },
+
+  clearLlmResults: () => {
+    set({ llmResults: [], llmStreamingText: "", llmState: "idle" });
   },
 
   connect: () => {
@@ -111,7 +137,36 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
             set({
               lastError: { code: event.code, message: event.message },
               recordingState: "idle",
+              llmState: "idle",
             });
+            break;
+
+          // LLM events (Story 2.4)
+          case "llm.start":
+            set({ llmState: "processing", llmStreamingText: "" });
+            break;
+
+          case "llm.delta":
+            set((state) => ({
+              llmState: "streaming",
+              llmStreamingText: state.llmStreamingText + event.text,
+            }));
+            break;
+
+          case "llm.end":
+            set((state) => ({
+              llmState: "idle",
+              llmResults: [
+                ...state.llmResults,
+                {
+                  text: state.llmStreamingText,
+                  latency_ms: event.latency_ms,
+                  ttft_ms: event.ttft_ms,
+                  timestamp: Date.now(),
+                },
+              ],
+              llmStreamingText: "",
+            }));
             break;
         }
       },

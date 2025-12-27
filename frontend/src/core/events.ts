@@ -54,8 +54,36 @@ export interface ErrorEvent {
   message: string;
 }
 
+// ============================================
+// LLM Events (Story 2.4)
+// ============================================
+
+/** LLM processing started */
+export interface LlmStartEvent {
+  type: "llm.start";
+}
+
+/** LLM streaming token */
+export interface LlmDeltaEvent {
+  type: "llm.delta";
+  text: string;
+}
+
+/** LLM processing completed */
+export interface LlmEndEvent {
+  type: "llm.end";
+  latency_ms: number;
+  ttft_ms: number;
+}
+
 /** Union of all server-to-client events */
-export type ServerEvent = SttPartialEvent | SttFinalEvent | ErrorEvent;
+export type ServerEvent =
+  | SttPartialEvent
+  | SttFinalEvent
+  | LlmStartEvent
+  | LlmDeltaEvent
+  | LlmEndEvent
+  | ErrorEvent;
 
 /** Recording state for UI */
 export type RecordingState = "idle" | "recording" | "processing";
@@ -92,6 +120,27 @@ export function parseServerEvent(data: unknown): ServerEvent | null {
     typeof event.message === "string"
   ) {
     return { type: "error", code: event.code, message: event.message };
+  }
+
+  // LLM events (Story 2.4)
+  if (type === "llm.start") {
+    return { type: "llm.start" };
+  }
+
+  if (type === "llm.delta" && typeof event.text === "string") {
+    return { type: "llm.delta", text: event.text };
+  }
+
+  if (
+    type === "llm.end" &&
+    typeof event.latency_ms === "number" &&
+    typeof event.ttft_ms === "number"
+  ) {
+    return {
+      type: "llm.end",
+      latency_ms: event.latency_ms,
+      ttft_ms: event.ttft_ms,
+    };
   }
 
   return null;

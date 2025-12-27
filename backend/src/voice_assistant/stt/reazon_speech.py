@@ -2,7 +2,6 @@
 
 import asyncio
 import time
-from typing import Optional
 
 import numpy as np
 import torch
@@ -31,7 +30,7 @@ class ReazonSpeechSTT(BaseSTT):
     The model is lazily loaded on first transcription request.
     """
 
-    def __init__(self, device: Optional[str] = None):
+    def __init__(self, device: str | None = None):
         """Initialize the STT service.
 
         Args:

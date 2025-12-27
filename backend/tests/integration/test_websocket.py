@@ -27,7 +27,7 @@ class TestWebSocketConnection:
         """Test clean WebSocket disconnection."""
         connection_established = False
 
-        with client.websocket_connect("/api/v1/ws/chat") as websocket:
+        with client.websocket_connect("/api/v1/ws/chat") as _:
             connection_established = True
 
         assert connection_established
@@ -276,7 +276,8 @@ class TestSttIntegration:
 
     def test_audio_buffer_cleared_after_stt(self, client: TestClient, monkeypatch):
         """Test audio buffer is cleared after STT processing."""
-        from unittest.mock import AsyncMock, MagicMock
+        from collections.abc import AsyncIterator
+        from unittest.mock import MagicMock
 
         from voice_assistant.stt import TranscriptionResult
 
@@ -294,9 +295,34 @@ class TestSttIntegration:
         def mock_get_stt_service():
             return mock_stt
 
+        # Mock LLM service to avoid actual API calls
+        async def mock_stream_completion(messages) -> AsyncIterator[str]:
+            yield "mock response"
+
+        mock_llm = MagicMock()
+        mock_llm.stream_completion = mock_stream_completion
+
+        def mock_get_llm_service():
+            return mock_llm
+
         monkeypatch.setattr(
             "voice_assistant.api.websocket.get_stt_service", mock_get_stt_service
         )
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_llm_service", mock_get_llm_service
+        )
+
+        def consume_llm_events(websocket):
+            """Consume LLM events (llm.start, llm.delta, llm.end)."""
+            # llm.start
+            event = websocket.receive_json()
+            assert event["type"] == "llm.start"
+            # llm.delta
+            event = websocket.receive_json()
+            assert event["type"] == "llm.delta"
+            # llm.end
+            event = websocket.receive_json()
+            assert event["type"] == "llm.end"
 
         with client.websocket_connect("/api/v1/ws/chat") as websocket:
             import numpy as np
@@ -309,6 +335,7 @@ class TestSttIntegration:
 
             response1 = websocket.receive_json()
             assert response1["text"] == "result 1"
+            consume_llm_events(websocket)
 
             # Second audio session (should have fresh buffer)
             websocket.send_text(json.dumps({"type": "vad.start", "timestamp": 3}))
@@ -318,7 +345,395 @@ class TestSttIntegration:
 
             response2 = websocket.receive_json()
             assert response2["text"] == "result 2"
+            consume_llm_events(websocket)
 
             # Verify audio lengths are different (buffer was cleared)
             assert len(audio_lengths) == 2
             assert audio_lengths[0] != audio_lengths[1]
+
+
+class TestLlmIntegration:
+    """Tests for LLM integration in WebSocket flow."""
+
+    def _create_audio_message(self, audio_data: bytes, sample_rate: int = 16000) -> bytes:
+        """Create binary audio message with header."""
+        header = json.dumps({"type": "vad.audio", "sampleRate": sample_rate}).encode()
+        header_length = len(header).to_bytes(4, byteorder="little")
+        return header_length + header + audio_data
+
+    def test_llm_events_after_stt(self, client: TestClient, monkeypatch):
+        """Test LLM events are sent after STT processing."""
+        from collections.abc import AsyncIterator
+        from unittest.mock import MagicMock
+
+        from voice_assistant.stt import TranscriptionResult
+
+        async def mock_transcribe(audio_data: bytes, sample_rate: int):
+            return TranscriptionResult(text="こんにちは", latency_ms=100.0)
+
+        mock_stt = MagicMock()
+        mock_stt.transcribe = mock_transcribe
+
+        async def mock_stream_completion(messages) -> AsyncIterator[str]:
+            yield "Hello"
+            yield " there!"
+
+        mock_llm = MagicMock()
+        mock_llm.stream_completion = mock_stream_completion
+
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_stt_service", lambda: mock_stt
+        )
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_llm_service", lambda: mock_llm
+        )
+
+        with client.websocket_connect("/api/v1/ws/chat") as websocket:
+            import numpy as np
+
+            # Send audio
+            websocket.send_text(json.dumps({"type": "vad.start", "timestamp": 1}))
+            audio = np.zeros(8000, dtype=np.float32)
+            websocket.send_bytes(self._create_audio_message(audio.tobytes()))
+            websocket.send_text(json.dumps({"type": "vad.end", "timestamp": 2}))
+
+            # Receive stt.final
+            stt_final = websocket.receive_json()
+            assert stt_final["type"] == "stt.final"
+            assert stt_final["text"] == "こんにちは"
+
+            # Receive llm.start
+            llm_start = websocket.receive_json()
+            assert llm_start["type"] == "llm.start"
+
+            # Receive llm.delta events
+            llm_delta1 = websocket.receive_json()
+            assert llm_delta1["type"] == "llm.delta"
+            assert llm_delta1["text"] == "Hello"
+
+            llm_delta2 = websocket.receive_json()
+            assert llm_delta2["type"] == "llm.delta"
+            assert llm_delta2["text"] == " there!"
+
+            # Receive llm.end
+            llm_end = websocket.receive_json()
+            assert llm_end["type"] == "llm.end"
+            assert "latency_ms" in llm_end
+            assert "ttft_ms" in llm_end
+
+    def test_llm_end_contains_latency_metrics(self, client: TestClient, monkeypatch):
+        """Test llm.end event contains required latency metrics."""
+        from collections.abc import AsyncIterator
+        from unittest.mock import MagicMock
+
+        from voice_assistant.stt import TranscriptionResult
+
+        async def mock_transcribe(audio_data: bytes, sample_rate: int):
+            return TranscriptionResult(text="test", latency_ms=50.0)
+
+        mock_stt = MagicMock()
+        mock_stt.transcribe = mock_transcribe
+
+        async def mock_stream_completion(messages) -> AsyncIterator[str]:
+            yield "response"
+
+        mock_llm = MagicMock()
+        mock_llm.stream_completion = mock_stream_completion
+
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_stt_service", lambda: mock_stt
+        )
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_llm_service", lambda: mock_llm
+        )
+
+        with client.websocket_connect("/api/v1/ws/chat") as websocket:
+            import numpy as np
+
+            websocket.send_text(json.dumps({"type": "vad.start", "timestamp": 1}))
+            audio = np.zeros(4000, dtype=np.float32)
+            websocket.send_bytes(self._create_audio_message(audio.tobytes()))
+            websocket.send_text(json.dumps({"type": "vad.end", "timestamp": 2}))
+
+            # Skip stt.final
+            websocket.receive_json()
+            # Skip llm.start
+            websocket.receive_json()
+            # Skip llm.delta
+            websocket.receive_json()
+
+            # Check llm.end
+            llm_end = websocket.receive_json()
+            assert llm_end["type"] == "llm.end"
+            assert isinstance(llm_end["latency_ms"], (int, float))
+            assert isinstance(llm_end["ttft_ms"], (int, float))
+            assert llm_end["latency_ms"] >= 0
+            assert llm_end["ttft_ms"] >= 0
+
+    def test_conversation_context_maintained(self, client: TestClient, monkeypatch):
+        """Test conversation context is maintained across turns."""
+        from collections.abc import AsyncIterator
+        from unittest.mock import MagicMock
+
+        from voice_assistant.stt import TranscriptionResult
+
+        stt_call_count = [0]
+
+        async def mock_transcribe(audio_data: bytes, sample_rate: int):
+            stt_call_count[0] += 1
+            return TranscriptionResult(
+                text=f"message {stt_call_count[0]}", latency_ms=50.0
+            )
+
+        mock_stt = MagicMock()
+        mock_stt.transcribe = mock_transcribe
+
+        received_messages = []
+
+        async def mock_stream_completion(messages) -> AsyncIterator[str]:
+            received_messages.append(messages)
+            yield f"response to turn {len(received_messages)}"
+
+        mock_llm = MagicMock()
+        mock_llm.stream_completion = mock_stream_completion
+
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_stt_service", lambda: mock_stt
+        )
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_llm_service", lambda: mock_llm
+        )
+
+        def consume_all_events(websocket):
+            """Consume all events for one turn."""
+            websocket.receive_json()  # stt.final
+            websocket.receive_json()  # llm.start
+            websocket.receive_json()  # llm.delta
+            websocket.receive_json()  # llm.end
+
+        with client.websocket_connect("/api/v1/ws/chat") as websocket:
+            import numpy as np
+
+            # First turn
+            websocket.send_text(json.dumps({"type": "vad.start", "timestamp": 1}))
+            audio = np.zeros(4000, dtype=np.float32)
+            websocket.send_bytes(self._create_audio_message(audio.tobytes()))
+            websocket.send_text(json.dumps({"type": "vad.end", "timestamp": 2}))
+            consume_all_events(websocket)
+
+            # Second turn
+            websocket.send_text(json.dumps({"type": "vad.start", "timestamp": 3}))
+            websocket.send_bytes(self._create_audio_message(audio.tobytes()))
+            websocket.send_text(json.dumps({"type": "vad.end", "timestamp": 4}))
+            consume_all_events(websocket)
+
+            # Verify context is maintained
+            # First call: system + user message
+            assert len(received_messages[0]) == 2
+            assert received_messages[0][0]["role"] == "system"
+            assert received_messages[0][1]["role"] == "user"
+
+            # Second call: system + user + assistant + user
+            assert len(received_messages[1]) == 4
+            assert received_messages[1][0]["role"] == "system"
+            assert received_messages[1][1]["role"] == "user"
+            assert received_messages[1][2]["role"] == "assistant"
+            assert received_messages[1][3]["role"] == "user"
+
+    def test_empty_stt_text_skips_llm(self, client: TestClient, monkeypatch):
+        """Test that empty STT text does not trigger LLM processing."""
+        from unittest.mock import MagicMock
+
+        from voice_assistant.stt import TranscriptionResult
+
+        async def mock_transcribe(audio_data: bytes, sample_rate: int):
+            return TranscriptionResult(text="", latency_ms=50.0)
+
+        mock_stt = MagicMock()
+        mock_stt.transcribe = mock_transcribe
+
+        llm_called = [False]
+
+        async def mock_stream_completion(messages):
+            llm_called[0] = True
+            if False:
+                yield ""
+
+        mock_llm = MagicMock()
+        mock_llm.stream_completion = mock_stream_completion
+
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_stt_service", lambda: mock_stt
+        )
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_llm_service", lambda: mock_llm
+        )
+
+        with client.websocket_connect("/api/v1/ws/chat") as websocket:
+            import numpy as np
+
+            websocket.send_text(json.dumps({"type": "vad.start", "timestamp": 1}))
+            audio = np.zeros(4000, dtype=np.float32)
+            websocket.send_bytes(self._create_audio_message(audio.tobytes()))
+            websocket.send_text(json.dumps({"type": "vad.end", "timestamp": 2}))
+
+            # Should receive stt.final with empty text
+            stt_final = websocket.receive_json()
+            assert stt_final["type"] == "stt.final"
+            assert stt_final["text"] == ""
+
+            # LLM should not have been called
+            assert not llm_called[0]
+
+    def test_llm_rate_limit_error(self, client: TestClient, monkeypatch):
+        """Test error event is sent when LLM returns rate limit error."""
+        from unittest.mock import MagicMock
+
+        from openai import RateLimitError
+
+        from voice_assistant.stt import TranscriptionResult
+
+        async def mock_transcribe(audio_data: bytes, sample_rate: int):
+            return TranscriptionResult(text="test", latency_ms=50.0)
+
+        mock_stt = MagicMock()
+        mock_stt.transcribe = mock_transcribe
+
+        async def mock_stream_completion(messages):
+            raise RateLimitError(
+                message="Rate limit exceeded",
+                response=MagicMock(status_code=429),
+                body=None,
+            )
+            yield  # Make it a generator
+
+        mock_llm = MagicMock()
+        mock_llm.stream_completion = mock_stream_completion
+
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_stt_service", lambda: mock_stt
+        )
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_llm_service", lambda: mock_llm
+        )
+
+        with client.websocket_connect("/api/v1/ws/chat") as websocket:
+            import numpy as np
+
+            websocket.send_text(json.dumps({"type": "vad.start", "timestamp": 1}))
+            audio = np.zeros(4000, dtype=np.float32)
+            websocket.send_bytes(self._create_audio_message(audio.tobytes()))
+            websocket.send_text(json.dumps({"type": "vad.end", "timestamp": 2}))
+
+            # Skip stt.final
+            websocket.receive_json()
+            # Skip llm.start
+            websocket.receive_json()
+
+            # Should receive error event
+            error_event = websocket.receive_json()
+            assert error_event["type"] == "error"
+            assert error_event["code"] == "LLM_RATE_LIMIT"
+            assert "レート制限" in error_event["message"]
+
+    def test_llm_auth_error(self, client: TestClient, monkeypatch):
+        """Test error event is sent when LLM returns authentication error."""
+        from unittest.mock import MagicMock
+
+        from openai import AuthenticationError
+
+        from voice_assistant.stt import TranscriptionResult
+
+        async def mock_transcribe(audio_data: bytes, sample_rate: int):
+            return TranscriptionResult(text="test", latency_ms=50.0)
+
+        mock_stt = MagicMock()
+        mock_stt.transcribe = mock_transcribe
+
+        async def mock_stream_completion(messages):
+            raise AuthenticationError(
+                message="Invalid API key",
+                response=MagicMock(status_code=401),
+                body=None,
+            )
+            yield  # Make it a generator
+
+        mock_llm = MagicMock()
+        mock_llm.stream_completion = mock_stream_completion
+
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_stt_service", lambda: mock_stt
+        )
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_llm_service", lambda: mock_llm
+        )
+
+        with client.websocket_connect("/api/v1/ws/chat") as websocket:
+            import numpy as np
+
+            websocket.send_text(json.dumps({"type": "vad.start", "timestamp": 1}))
+            audio = np.zeros(4000, dtype=np.float32)
+            websocket.send_bytes(self._create_audio_message(audio.tobytes()))
+            websocket.send_text(json.dumps({"type": "vad.end", "timestamp": 2}))
+
+            # Skip stt.final
+            websocket.receive_json()
+            # Skip llm.start
+            websocket.receive_json()
+
+            # Should receive error event
+            error_event = websocket.receive_json()
+            assert error_event["type"] == "error"
+            assert error_event["code"] == "LLM_AUTH_ERROR"
+            assert "認証" in error_event["message"]
+
+    def test_llm_api_error(self, client: TestClient, monkeypatch):
+        """Test error event is sent when LLM returns generic API error."""
+        from unittest.mock import MagicMock
+
+        from openai import APIError
+
+        from voice_assistant.stt import TranscriptionResult
+
+        async def mock_transcribe(audio_data: bytes, sample_rate: int):
+            return TranscriptionResult(text="test", latency_ms=50.0)
+
+        mock_stt = MagicMock()
+        mock_stt.transcribe = mock_transcribe
+
+        async def mock_stream_completion(messages):
+            raise APIError(
+                message="Internal server error",
+                request=MagicMock(),
+                body=None,
+            )
+            yield  # Make it a generator
+
+        mock_llm = MagicMock()
+        mock_llm.stream_completion = mock_stream_completion
+
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_stt_service", lambda: mock_stt
+        )
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_llm_service", lambda: mock_llm
+        )
+
+        with client.websocket_connect("/api/v1/ws/chat") as websocket:
+            import numpy as np
+
+            websocket.send_text(json.dumps({"type": "vad.start", "timestamp": 1}))
+            audio = np.zeros(4000, dtype=np.float32)
+            websocket.send_bytes(self._create_audio_message(audio.tobytes()))
+            websocket.send_text(json.dumps({"type": "vad.end", "timestamp": 2}))
+
+            # Skip stt.final
+            websocket.receive_json()
+            # Skip llm.start
+            websocket.receive_json()
+
+            # Should receive error event
+            error_event = websocket.receive_json()
+            assert error_event["type"] == "error"
+            assert error_event["code"] == "LLM_API_ERROR"
+            assert "APIエラー" in error_event["message"]

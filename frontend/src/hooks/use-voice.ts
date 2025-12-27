@@ -73,10 +73,7 @@ export function useVoice(): UseVoiceResult {
         serializeEvent({ type: "vad.end", timestamp: Date.now() })
       );
 
-      // Brief processing indicator before returning to idle
-      // TODO(Story 2.3): Replace with server response-based state transition
-      // when STT integration sends stt.final event
-      setTimeout(() => setRecordingState("idle"), 100);
+      // State will be reset to "idle" by voice-store when stt.final is received
     },
   });
 

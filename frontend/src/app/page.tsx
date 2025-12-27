@@ -4,7 +4,14 @@ import { VoiceInput } from "@/components/VoiceInput";
 import { useVoiceStore } from "@/stores/voice-store";
 
 export default function Home() {
-  const { connectionState, connect, disconnect } = useVoiceStore();
+  const {
+    connectionState,
+    connect,
+    disconnect,
+    partialText,
+    sttResults,
+    lastError,
+  } = useVoiceStore();
 
   const getStatusColor = () => {
     switch (connectionState) {
@@ -70,6 +77,44 @@ export default function Home() {
       {/* Voice Input - Story 2.2 */}
       <div className="mt-12">
         <VoiceInput />
+      </div>
+
+      {/* STT Results Display - Story 2.3 */}
+      <div className="mt-8 w-full max-w-2xl">
+        {/* Partial Text (streaming) */}
+        {partialText && (
+          <div className="p-4 bg-gray-100 rounded-lg mb-4">
+            <p className="text-sm text-gray-500 mb-1">認識中...</p>
+            <p className="text-gray-700 italic">{partialText}</p>
+          </div>
+        )}
+
+        {/* Error Display */}
+        {lastError && (
+          <div className="p-4 bg-red-50 border border-red-200 rounded-lg mb-4">
+            <p className="text-sm text-red-600">
+              エラー [{lastError.code}]: {lastError.message}
+            </p>
+          </div>
+        )}
+
+        {/* Final Results */}
+        {sttResults.length > 0 && (
+          <div className="space-y-4">
+            <h2 className="text-lg font-semibold text-gray-700">認識結果</h2>
+            {sttResults.map((result, index) => (
+              <div
+                key={`${result.timestamp}-${index}`}
+                className="p-4 bg-white border border-gray-200 rounded-lg shadow-sm"
+              >
+                <p className="text-gray-800">{result.text}</p>
+                <p className="text-xs text-gray-400 mt-2">
+                  処理時間: {result.latency_ms.toFixed(0)}ms
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* チャットUIは Story 2.7 で実装 */}

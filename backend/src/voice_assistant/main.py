@@ -4,7 +4,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlmodel import Session
@@ -42,6 +42,30 @@ class ConversationResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     messages: list[MessageResponse]
+
+
+class ConversationListItem(BaseModel):
+    """Response model for conversation list item (without messages)."""
+
+    id: str
+    title: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationListMeta(BaseModel):
+    """Pagination metadata."""
+
+    total: int
+    limit: int
+    offset: int
+
+
+class ConversationListResponse(BaseModel):
+    """Response model for conversation list."""
+
+    data: list[ConversationListItem]
+    meta: ConversationListMeta
 
 
 @asynccontextmanager
@@ -87,6 +111,43 @@ async def health_check() -> dict[str, str]:
         dict with status "ok" if the service is healthy.
     """
     return {"status": "ok"}
+
+
+@app.get("/api/v1/conversations")
+async def list_conversations(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> ConversationListResponse:
+    """Get list of conversations with pagination.
+
+    Args:
+        limit: Maximum number of conversations (1-100, default: 20)
+        offset: Number of conversations to skip (default: 0)
+
+    Returns:
+        List of conversations with pagination metadata.
+    """
+    with Session(get_engine()) as session:
+        conv_repo = ConversationRepository(session)
+        conversations = conv_repo.list_all(limit=limit, offset=offset)
+        total = conv_repo.count()
+
+        return ConversationListResponse(
+            data=[
+                ConversationListItem(
+                    id=conv.id,
+                    title=conv.title,
+                    created_at=conv.created_at,
+                    updated_at=conv.updated_at,
+                )
+                for conv in conversations
+            ],
+            meta=ConversationListMeta(
+                total=total,
+                limit=limit,
+                offset=offset,
+            ),
+        )
 
 
 @app.get("/api/v1/conversations/latest")

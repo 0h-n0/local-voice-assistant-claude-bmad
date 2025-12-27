@@ -128,6 +128,21 @@ class TestConversationRepository:
         # Should skip first 2
         assert convs[0].title == "Conv 2"
 
+    def test_count_empty_db(self, session):
+        """Should return 0 when no conversations exist."""
+        repo = ConversationRepository(session)
+        count = repo.count()
+        assert count == 0
+
+    def test_count_with_conversations(self, session):
+        """Should return total number of conversations."""
+        repo = ConversationRepository(session)
+        for i in range(5):
+            repo.create(title=f"Conv {i}")
+
+        count = repo.count()
+        assert count == 5
+
     def test_update_conversation_title(self, session):
         """Should update conversation title."""
         repo = ConversationRepository(session)

@@ -11,6 +11,9 @@ export default function Home() {
     partialText,
     sttResults,
     lastError,
+    llmState,
+    llmStreamingText,
+    llmResults,
   } = useVoiceStore();
 
   const getStatusColor = () => {
@@ -79,16 +82,8 @@ export default function Home() {
         <VoiceInput />
       </div>
 
-      {/* STT Results Display - Story 2.3 */}
+      {/* Conversation Display - Story 2.4 */}
       <div className="mt-8 w-full max-w-2xl">
-        {/* Partial Text (streaming) */}
-        {partialText && (
-          <div className="p-4 bg-gray-100 rounded-lg mb-4">
-            <p className="text-sm text-gray-500 mb-1">認識中...</p>
-            <p className="text-gray-700 italic">{partialText}</p>
-          </div>
-        )}
-
         {/* Error Display */}
         {lastError && (
           <div className="p-4 bg-red-50 border border-red-200 rounded-lg mb-4">
@@ -98,26 +93,73 @@ export default function Home() {
           </div>
         )}
 
-        {/* Final Results */}
-        {sttResults.length > 0 && (
+        {/* Conversation History */}
+        {(sttResults.length > 0 || llmResults.length > 0) && (
           <div className="space-y-4">
-            <h2 className="text-lg font-semibold text-gray-700">認識結果</h2>
-            {sttResults.map((result, index) => (
-              <div
-                key={`${result.timestamp}-${index}`}
-                className="p-4 bg-white border border-gray-200 rounded-lg shadow-sm"
-              >
-                <p className="text-gray-800">{result.text}</p>
-                <p className="text-xs text-gray-400 mt-2">
-                  処理時間: {result.latency_ms.toFixed(0)}ms
-                </p>
-              </div>
-            ))}
+            <h2 className="text-lg font-semibold text-gray-700">会話</h2>
+            {/* Interleave STT and LLM results based on timestamps */}
+            {(() => {
+              const messages = [
+                ...sttResults.map((r, i) => ({
+                  ...r,
+                  role: "user" as const,
+                  key: `stt-${r.timestamp}-${i}`,
+                })),
+                ...llmResults.map((r, i) => ({
+                  ...r,
+                  role: "assistant" as const,
+                  key: `llm-${r.timestamp}-${i}`,
+                })),
+              ].sort((a, b) => a.timestamp - b.timestamp);
+
+              return messages.map((msg) => (
+                <div
+                  key={msg.key}
+                  className={`p-4 rounded-lg shadow-sm ${
+                    msg.role === "user"
+                      ? "bg-blue-50 border border-blue-200 ml-8"
+                      : "bg-green-50 border border-green-200 mr-8"
+                  }`}
+                >
+                  <p className="text-xs text-gray-500 mb-1">
+                    {msg.role === "user" ? "あなた" : "アシスタント"}
+                  </p>
+                  <p className="text-gray-800 whitespace-pre-wrap">{msg.text}</p>
+                  <p className="text-xs text-gray-400 mt-2">
+                    処理時間: {msg.latency_ms.toFixed(0)}ms
+                    {msg.role === "assistant" && "ttft_ms" in msg && (
+                      <span> (TTFT: {(msg as { ttft_ms: number }).ttft_ms.toFixed(0)}ms)</span>
+                    )}
+                  </p>
+                </div>
+              ));
+            })()}
+          </div>
+        )}
+
+        {/* Partial STT Text (streaming) */}
+        {partialText && (
+          <div className="p-4 bg-gray-100 rounded-lg mt-4 ml-8">
+            <p className="text-xs text-gray-500 mb-1">認識中...</p>
+            <p className="text-gray-700 italic">{partialText}</p>
+          </div>
+        )}
+
+        {/* LLM Streaming Text */}
+        {(llmState === "processing" || llmState === "streaming") && (
+          <div className="p-4 bg-green-50 border border-green-200 rounded-lg mt-4 mr-8">
+            <p className="text-xs text-gray-500 mb-1">
+              {llmState === "processing" ? "考え中..." : "応答中..."}
+            </p>
+            {llmStreamingText && (
+              <p className="text-gray-800 whitespace-pre-wrap">{llmStreamingText}</p>
+            )}
+            {llmState === "processing" && (
+              <span className="inline-block w-2 h-4 bg-gray-400 animate-pulse" />
+            )}
           </div>
         )}
       </div>
-
-      {/* チャットUIは Story 2.7 で実装 */}
     </main>
   );
 }

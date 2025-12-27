@@ -1,21 +1,27 @@
 """WebSocket endpoint for real-time voice chat"""
 
 import json
+import os
 import threading
-from typing import Optional
+import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from starlette.websockets import WebSocketState
+from openai import APIError, AuthenticationError, RateLimitError
 
 from voice_assistant.core.logging import get_logger
+from voice_assistant.llm import ConversationContext, OpenAICompatLLM
 from voice_assistant.stt import ReazonSpeechSTT, get_stt_device
 
 router = APIRouter()
 logger = get_logger(__name__)
 
 # Global STT service instance (lazy loaded, thread-safe)
-_stt_service: Optional[ReazonSpeechSTT] = None
+_stt_service: ReazonSpeechSTT | None = None
 _stt_service_lock = threading.Lock()
+
+# Global LLM service instance (lazy loaded, thread-safe)
+_llm_service: OpenAICompatLLM | None = None
+_llm_service_lock = threading.Lock()
 
 
 def get_stt_service() -> ReazonSpeechSTT:
@@ -29,6 +35,20 @@ def get_stt_service() -> ReazonSpeechSTT:
                 logger.info("initializing_stt_service", device=device)
                 _stt_service = ReazonSpeechSTT(device=device)
     return _stt_service
+
+
+def get_llm_service() -> OpenAICompatLLM:
+    """Get or create the global LLM service instance (thread-safe)."""
+    global _llm_service
+    if _llm_service is None:
+        with _llm_service_lock:
+            # Double-check locking pattern
+            if _llm_service is None:
+                base_url = os.getenv("OPENAI_BASE_URL", "http://localhost:11434/v1")
+                model = os.getenv("LLM_MODEL", "llama3.2")
+                logger.info("initializing_llm_service", base_url=base_url, model=model)
+                _llm_service = OpenAICompatLLM(base_url=base_url, model=model)
+    return _llm_service
 
 
 class AudioBuffer:
@@ -52,16 +72,116 @@ class AudioBuffer:
         return len(self.chunks) > 0
 
 
+async def handle_llm_completion(
+    websocket: WebSocket,
+    text: str,
+    context: ConversationContext,
+    client_info: str,
+) -> None:
+    """Handle LLM completion after STT with streaming response.
+
+    Args:
+        websocket: The WebSocket connection.
+        text: The transcribed text from STT.
+        context: The conversation context for maintaining history.
+        client_info: Client identification string for logging.
+    """
+    if not text.strip():
+        logger.debug("llm_skip_empty_text", client=client_info)
+        return
+
+    # Add user message to context
+    context.add_user_message(text)
+
+    try:
+        # Send llm.start event
+        await websocket.send_json({"type": "llm.start"})
+        logger.info("llm_start_sent", client=client_info)
+
+        llm_service = get_llm_service()
+        start_time = time.perf_counter()
+        ttft: float | None = None
+        full_response = ""
+
+        async for token in llm_service.stream_completion(context.get_messages()):
+            if ttft is None:
+                ttft = (time.perf_counter() - start_time) * 1000
+
+            full_response += token
+            await websocket.send_json({"type": "llm.delta", "text": token})
+
+        latency_ms = (time.perf_counter() - start_time) * 1000
+
+        # Add assistant response to context
+        context.add_assistant_message(full_response)
+
+        # Send llm.end event
+        await websocket.send_json(
+            {
+                "type": "llm.end",
+                "latency_ms": round(latency_ms, 2),
+                "ttft_ms": round(ttft or 0, 2),
+            }
+        )
+
+        logger.info(
+            "llm_completed",
+            client=client_info,
+            response_length=len(full_response),
+            latency_ms=round(latency_ms, 2),
+            ttft_ms=round(ttft or 0, 2),
+        )
+
+    except RateLimitError:
+        logger.warning("llm_rate_limit", client=client_info)
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": "LLM_RATE_LIMIT",
+                "message": "APIレート制限に達しました。しばらく待ってから再試行してください。",
+            }
+        )
+    except AuthenticationError:
+        logger.error("llm_auth_error", client=client_info)
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": "LLM_AUTH_ERROR",
+                "message": "LLM APIの認証に失敗しました。APIキーを確認してください。",
+            }
+        )
+    except APIError as e:
+        logger.error("llm_api_error", client=client_info, error=str(e))
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": "LLM_API_ERROR",
+                "message": f"LLM APIエラー: {str(e)}",
+            }
+        )
+    except Exception as e:
+        logger.error("llm_unexpected_error", client=client_info, error=str(e))
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": "LLM_ERROR",
+                "message": "LLM処理中にエラーが発生しました",
+            }
+        )
+
+
 async def handle_vad_end(
     websocket: WebSocket,
     audio_buffer: AudioBuffer,
+    context: ConversationContext,
     client_info: str,
 ) -> None:
-    """Handle vad.end event by running STT and sending results.
+    """Handle vad.end event by running STT and then LLM.
 
     Args:
         websocket: The WebSocket connection.
         audio_buffer: Buffer containing accumulated audio data.
+        context: The conversation context for maintaining history.
         client_info: Client identification string for logging.
     """
     if not audio_buffer.has_audio():
@@ -98,6 +218,10 @@ async def handle_vad_end(
             latency_ms=round(result.latency_ms, 2),
         )
 
+        # Continue to LLM processing if we got text
+        if result.text.strip():
+            await handle_llm_completion(websocket, result.text, context, client_info)
+
     except Exception as e:
         logger.error(
             "stt_processing_error",
@@ -121,6 +245,7 @@ async def handle_text_message(
     websocket: WebSocket,
     data: str,
     audio_buffer: AudioBuffer,
+    context: ConversationContext,
     client_info: str,
 ) -> None:
     """Handle text (JSON) messages from client."""
@@ -143,8 +268,8 @@ async def handle_text_message(
                 timestamp=event.get("timestamp"),
                 audio_chunks=len(audio_buffer.chunks),
             )
-            # Process audio with STT
-            await handle_vad_end(websocket, audio_buffer, client_info)
+            # Process audio with STT, then LLM
+            await handle_vad_end(websocket, audio_buffer, context, client_info)
 
         elif event_type == "cancel":
             logger.info("cancel_received", client=client_info)
@@ -225,6 +350,8 @@ async def websocket_chat(websocket: WebSocket) -> None:
     logger.info("websocket_connected", client=client_info)
 
     audio_buffer = AudioBuffer()
+    # Each WebSocket connection has its own conversation context
+    conversation_context = ConversationContext()
 
     try:
         while True:
@@ -237,6 +364,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
                         websocket,
                         message["text"],
                         audio_buffer,
+                        conversation_context,
                         client_info,
                     )
                 elif "bytes" in message:

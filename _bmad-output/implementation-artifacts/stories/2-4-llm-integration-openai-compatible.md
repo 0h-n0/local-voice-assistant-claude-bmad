@@ -1,6 +1,6 @@
 # Story 2.4: LLM統合（OpenAI互換）
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -24,34 +24,34 @@ so that **AIとの対話ができる** (FR5, FR6, FR7).
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: OpenAI Python SDK インストールと依存関係設定 (AC: #1)
-  - [ ] `backend/pyproject.toml` に `openai` パッケージ追加
-  - [ ] `httpx` パッケージ追加（非同期HTTPクライアント）
-  - [ ] 環境変数/設定ファイルでAPIキー・ベースURL管理
+- [x] Task 1: OpenAI Python SDK インストールと依存関係設定 (AC: #1)
+  - [x] `backend/pyproject.toml` に `openai` パッケージ追加
+  - [x] `httpx` パッケージ追加（非同期HTTPクライアント）
+  - [x] 環境変数/設定ファイルでAPIキー・ベースURL管理
 
-- [ ] Task 2: LLMサービス層実装 (AC: #1, #2, #3, #4)
-  - [ ] `backend/src/voice_assistant/llm/base.py` LLM抽象基底クラス
-  - [ ] `backend/src/voice_assistant/llm/openai_compat.py` OpenAI互換実装
-  - [ ] ストリーミング対応（async generator）
-  - [ ] 会話コンテキスト管理（直近N件のメッセージ保持）
-  - [ ] レイテンシ計測（TTFT + 総時間）
+- [x] Task 2: LLMサービス層実装 (AC: #1, #2, #3, #4)
+  - [x] `backend/src/voice_assistant/llm/base.py` LLM抽象基底クラス
+  - [x] `backend/src/voice_assistant/llm/openai_compat.py` OpenAI互換実装
+  - [x] ストリーミング対応（async generator）
+  - [x] 会話コンテキスト管理（直近N件のメッセージ保持）
+  - [x] レイテンシ計測（TTFT + 総時間）
 
-- [ ] Task 3: WebSocketイベント送信実装 (AC: #1, #2, #3)
-  - [ ] `backend/src/voice_assistant/api/websocket.py` 更新
-  - [ ] `stt.final` 受信後にLLM処理を開始
-  - [ ] `llm.start` イベント送信
-  - [ ] `llm.delta` イベント送信（トークン単位）
-  - [ ] `llm.end` イベント送信（latency_ms, ttft_ms）
+- [x] Task 3: WebSocketイベント送信実装 (AC: #1, #2, #3)
+  - [x] `backend/src/voice_assistant/api/websocket.py` 更新
+  - [x] `stt.final` 受信後にLLM処理を開始
+  - [x] `llm.start` イベント送信
+  - [x] `llm.delta` イベント送信（トークン単位）
+  - [x] `llm.end` イベント送信（latency_ms, ttft_ms）
 
-- [ ] Task 4: Frontendイベント受信処理 (AC: #5)
-  - [ ] `frontend/src/core/events.ts` LLMイベント型追加
-  - [ ] `frontend/src/stores/voice-store.ts` LLM応答状態管理
-  - [ ] `frontend/src/app/page.tsx` リアルタイムテキスト表示
+- [x] Task 4: Frontendイベント受信処理 (AC: #5)
+  - [x] `frontend/src/core/events.ts` LLMイベント型追加
+  - [x] `frontend/src/stores/voice-store.ts` LLM応答状態管理
+  - [x] `frontend/src/app/page.tsx` リアルタイムテキスト表示
 
-- [ ] Task 5: 統合テスト (AC: #1-5)
-  - [ ] pytest LLMサービステスト（モック使用）
-  - [ ] WebSocket統合テスト（LLMイベントフロー）
-  - [ ] E2E動作確認（実際のLLM APIを使用）
+- [x] Task 5: 統合テスト (AC: #1-5)
+  - [x] pytest LLMサービステスト（モック使用）
+  - [x] WebSocket統合テスト（LLMイベントフロー）
+  - [x] E2E動作確認（実際のLLM APIを使用）
 
 ## Dev Notes
 
@@ -500,11 +500,37 @@ ollama pull qwen2.5:7b
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.5 (claude-opus-4-5-20251101)
 
 ### Debug Log References
 
+- All 47 backend tests passing
+- Frontend lint and build successful
+
 ### Completion Notes List
 
+1. Implemented OpenAI-compatible LLM client with streaming support
+2. Added ConversationContext for maintaining chat history (max 10 messages)
+3. Integrated LLM processing into WebSocket flow after STT
+4. Added comprehensive error handling for OpenAI API errors
+5. Updated frontend to display conversation with streaming LLM responses
+6. All acceptance criteria verified through integration tests
+
 ### File List
+
+**Backend (New):**
+- `backend/src/voice_assistant/llm/__init__.py` - Module exports
+- `backend/src/voice_assistant/llm/base.py` - ConversationContext, BaseLLM
+- `backend/src/voice_assistant/llm/openai_compat.py` - OpenAICompatLLM
+- `backend/tests/unit/test_llm.py` - 12 unit tests
+
+**Backend (Modified):**
+- `backend/pyproject.toml` - Added openai, httpx dependencies
+- `backend/src/voice_assistant/api/websocket.py` - LLM integration
+- `backend/tests/integration/test_websocket.py` - 4 new LLM tests
+
+**Frontend (Modified):**
+- `frontend/src/core/events.ts` - LLM event types
+- `frontend/src/stores/voice-store.ts` - LLM state management
+- `frontend/src/app/page.tsx` - Conversation display
 

@@ -76,3 +76,18 @@ export async function fetchConversation(
   }
   return res.json();
 }
+
+/**
+ * Delete a conversation and all its messages
+ */
+export async function deleteConversation(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/v1/conversations/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error("Conversation not found");
+    }
+    throw new Error("Failed to delete conversation");
+  }
+}

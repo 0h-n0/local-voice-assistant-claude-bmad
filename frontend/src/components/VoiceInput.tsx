@@ -8,7 +8,11 @@
 import { useVoice } from "@/hooks/use-voice";
 import { useVoiceStore } from "@/stores/voice-store";
 
-export function VoiceInput() {
+interface VoiceInputProps {
+  disabled?: boolean;
+}
+
+export function VoiceInput({ disabled = false }: VoiceInputProps) {
   const { connectionState } = useVoiceStore();
   const { recordingState, isVadLoading, isVadError, isListening, startListening, stopListening } = useVoice();
 
@@ -16,6 +20,9 @@ export function VoiceInput() {
   const showStopButton = isListening || recordingState !== "idle" || isVadLoading;
 
   const getButtonStyles = () => {
+    if (disabled) {
+      return "bg-gray-400 cursor-not-allowed";
+    }
     if (isVadError) {
       return "bg-red-700 cursor-not-allowed";
     }
@@ -33,6 +40,7 @@ export function VoiceInput() {
   };
 
   const getStatusText = () => {
+    if (disabled) return "履歴表示中";
     if (isVadError) return "VAD Error";
     if (!isConnected) return "Not connected";
     if (isVadLoading) return "Loading VAD...";
@@ -47,7 +55,7 @@ export function VoiceInput() {
   };
 
   const handleClick = () => {
-    if (!isConnected || isVadError) return;
+    if (disabled || !isConnected || isVadError) return;
 
     if (!showStopButton) {
       startListening();
@@ -60,7 +68,7 @@ export function VoiceInput() {
     <div className="flex flex-col items-center gap-3">
       <button
         onClick={handleClick}
-        disabled={!isConnected || isVadError}
+        disabled={disabled || !isConnected || isVadError}
         className={`
           w-20 h-20 rounded-full
           flex items-center justify-center

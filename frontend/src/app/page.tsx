@@ -1,5 +1,6 @@
 "use client";
 
+import { VoiceInput } from "@/components/VoiceInput";
 import { useVoiceStore } from "@/stores/voice-store";
 
 export default function Home() {
@@ -64,6 +65,11 @@ export default function Home() {
             接続中...
           </button>
         )}
+      </div>
+
+      {/* Voice Input - Story 2.2 */}
+      <div className="mt-12">
+        <VoiceInput />
       </div>
 
       {/* チャットUIは Story 2.7 で実装 */}

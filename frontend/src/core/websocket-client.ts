@@ -97,10 +97,15 @@ export class WebSocketClient {
 
   /**
    * Send data through WebSocket
+   * Supports string, ArrayBuffer, or objects (JSON serialized)
    */
-  send(data: unknown): boolean {
+  send(data: string | ArrayBuffer | object): boolean {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(typeof data === "string" ? data : JSON.stringify(data));
+      if (typeof data === "string" || data instanceof ArrayBuffer) {
+        this.ws.send(data);
+      } else {
+        this.ws.send(JSON.stringify(data));
+      }
       return true;
     }
     return false;

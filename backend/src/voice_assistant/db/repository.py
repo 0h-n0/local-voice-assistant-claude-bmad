@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from sqlalchemy import event
+from sqlalchemy import event, func
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from voice_assistant.db.models import Conversation, Message, generate_id, utc_now
@@ -141,6 +141,15 @@ class ConversationRepository:
             .limit(limit)
         )
         return list(self.session.exec(statement).all())
+
+    def count(self) -> int:
+        """Get total number of conversations.
+
+        Returns:
+            Total count of conversations
+        """
+        statement = select(func.count()).select_from(Conversation)
+        return self.session.exec(statement).one()
 
     def update(
         self, conversation_id: str, title: str | None = None

@@ -129,3 +129,128 @@ class TestGetConversation:
         response = client.get(f"/api/v1/conversations/{conv.id}")
         assert response.status_code == 200
         assert response.json()["messages"] == []
+
+
+class TestListConversations:
+    """Tests for GET /api/v1/conversations."""
+
+    def test_returns_empty_list_when_no_conversations(self, client):
+        """Should return empty list (not 404) when no conversations exist."""
+        response = client.get("/api/v1/conversations")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["data"] == []
+        assert data["meta"]["total"] == 0
+        assert data["meta"]["limit"] == 20
+        assert data["meta"]["offset"] == 0
+
+    def test_returns_conversations_list(self, client, sample_conversation):
+        """Should return list of conversations."""
+        response = client.get("/api/v1/conversations")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert len(data["data"]) == 1
+        assert data["data"][0]["id"] == sample_conversation
+        assert data["data"][0]["title"] == "Test Conversation"
+        assert "messages" not in data["data"][0]  # No messages in list view
+        assert data["meta"]["total"] == 1
+
+    def test_conversations_sorted_by_updated_at_desc(self, client, temp_db):
+        """Should return conversations sorted by updated_at descending."""
+        import time
+
+        engine = get_engine()
+        with Session(engine) as session:
+            conv_repo = ConversationRepository(session)
+
+            conv1 = conv_repo.create(title="First")
+            time.sleep(0.01)
+            conv2 = conv_repo.create(title="Second")
+            time.sleep(0.01)
+            conv3 = conv_repo.create(title="Third")
+
+        response = client.get("/api/v1/conversations")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert len(data["data"]) == 3
+        # Most recent first
+        assert data["data"][0]["title"] == "Third"
+        assert data["data"][1]["title"] == "Second"
+        assert data["data"][2]["title"] == "First"
+
+    def test_pagination_limit(self, client, temp_db):
+        """Should limit number of results with limit parameter."""
+        engine = get_engine()
+        with Session(engine) as session:
+            conv_repo = ConversationRepository(session)
+            for i in range(5):
+                conv_repo.create(title=f"Conv {i}")
+
+        response = client.get("/api/v1/conversations?limit=2")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert len(data["data"]) == 2
+        assert data["meta"]["total"] == 5
+        assert data["meta"]["limit"] == 2
+
+    def test_pagination_offset(self, client, temp_db):
+        """Should skip results with offset parameter."""
+        import time
+
+        engine = get_engine()
+        with Session(engine) as session:
+            conv_repo = ConversationRepository(session)
+            for i in range(5):
+                conv_repo.create(title=f"Conv {i}")
+                time.sleep(0.01)
+
+        response = client.get("/api/v1/conversations?limit=2&offset=2")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert len(data["data"]) == 2
+        assert data["meta"]["offset"] == 2
+        # Should get Conv 2 and Conv 1 (skipping Conv 4, Conv 3)
+        assert data["data"][0]["title"] == "Conv 2"
+        assert data["data"][1]["title"] == "Conv 1"
+
+    def test_limit_validation_max(self, client):
+        """Should reject limit greater than 100."""
+        response = client.get("/api/v1/conversations?limit=101")
+        assert response.status_code == 422  # Validation error
+
+    def test_limit_validation_min(self, client):
+        """Should reject limit less than 1."""
+        response = client.get("/api/v1/conversations?limit=0")
+        assert response.status_code == 422  # Validation error
+
+    def test_offset_validation_negative(self, client):
+        """Should reject negative offset."""
+        response = client.get("/api/v1/conversations?offset=-1")
+        assert response.status_code == 422  # Validation error
+
+    def test_conversation_fields_present(self, client, sample_conversation):
+        """Should include id, title, created_at, updated_at for each conversation."""
+        response = client.get("/api/v1/conversations")
+        assert response.status_code == 200
+
+        data = response.json()
+        conv = data["data"][0]
+        assert "id" in conv
+        assert "title" in conv
+        assert "created_at" in conv
+        assert "updated_at" in conv
+
+    def test_offset_exceeds_total(self, client, sample_conversation):
+        """Should return empty list when offset exceeds total count."""
+        response = client.get("/api/v1/conversations?offset=100")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["data"] == []
+        assert data["meta"]["total"] == 1  # sample_conversation exists
+        assert data["meta"]["offset"] == 100

@@ -584,3 +584,156 @@ class TestLlmIntegration:
 
             # LLM should not have been called
             assert not llm_called[0]
+
+    def test_llm_rate_limit_error(self, client: TestClient, monkeypatch):
+        """Test error event is sent when LLM returns rate limit error."""
+        from unittest.mock import MagicMock
+
+        from openai import RateLimitError
+
+        from voice_assistant.stt import TranscriptionResult
+
+        async def mock_transcribe(audio_data: bytes, sample_rate: int):
+            return TranscriptionResult(text="test", latency_ms=50.0)
+
+        mock_stt = MagicMock()
+        mock_stt.transcribe = mock_transcribe
+
+        async def mock_stream_completion(messages):
+            raise RateLimitError(
+                message="Rate limit exceeded",
+                response=MagicMock(status_code=429),
+                body=None,
+            )
+            yield  # Make it a generator
+
+        mock_llm = MagicMock()
+        mock_llm.stream_completion = mock_stream_completion
+
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_stt_service", lambda: mock_stt
+        )
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_llm_service", lambda: mock_llm
+        )
+
+        with client.websocket_connect("/api/v1/ws/chat") as websocket:
+            import numpy as np
+
+            websocket.send_text(json.dumps({"type": "vad.start", "timestamp": 1}))
+            audio = np.zeros(4000, dtype=np.float32)
+            websocket.send_bytes(self._create_audio_message(audio.tobytes()))
+            websocket.send_text(json.dumps({"type": "vad.end", "timestamp": 2}))
+
+            # Skip stt.final
+            websocket.receive_json()
+            # Skip llm.start
+            websocket.receive_json()
+
+            # Should receive error event
+            error_event = websocket.receive_json()
+            assert error_event["type"] == "error"
+            assert error_event["code"] == "LLM_RATE_LIMIT"
+            assert "レート制限" in error_event["message"]
+
+    def test_llm_auth_error(self, client: TestClient, monkeypatch):
+        """Test error event is sent when LLM returns authentication error."""
+        from unittest.mock import MagicMock
+
+        from openai import AuthenticationError
+
+        from voice_assistant.stt import TranscriptionResult
+
+        async def mock_transcribe(audio_data: bytes, sample_rate: int):
+            return TranscriptionResult(text="test", latency_ms=50.0)
+
+        mock_stt = MagicMock()
+        mock_stt.transcribe = mock_transcribe
+
+        async def mock_stream_completion(messages):
+            raise AuthenticationError(
+                message="Invalid API key",
+                response=MagicMock(status_code=401),
+                body=None,
+            )
+            yield  # Make it a generator
+
+        mock_llm = MagicMock()
+        mock_llm.stream_completion = mock_stream_completion
+
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_stt_service", lambda: mock_stt
+        )
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_llm_service", lambda: mock_llm
+        )
+
+        with client.websocket_connect("/api/v1/ws/chat") as websocket:
+            import numpy as np
+
+            websocket.send_text(json.dumps({"type": "vad.start", "timestamp": 1}))
+            audio = np.zeros(4000, dtype=np.float32)
+            websocket.send_bytes(self._create_audio_message(audio.tobytes()))
+            websocket.send_text(json.dumps({"type": "vad.end", "timestamp": 2}))
+
+            # Skip stt.final
+            websocket.receive_json()
+            # Skip llm.start
+            websocket.receive_json()
+
+            # Should receive error event
+            error_event = websocket.receive_json()
+            assert error_event["type"] == "error"
+            assert error_event["code"] == "LLM_AUTH_ERROR"
+            assert "認証" in error_event["message"]
+
+    def test_llm_api_error(self, client: TestClient, monkeypatch):
+        """Test error event is sent when LLM returns generic API error."""
+        from unittest.mock import MagicMock
+
+        from openai import APIError
+
+        from voice_assistant.stt import TranscriptionResult
+
+        async def mock_transcribe(audio_data: bytes, sample_rate: int):
+            return TranscriptionResult(text="test", latency_ms=50.0)
+
+        mock_stt = MagicMock()
+        mock_stt.transcribe = mock_transcribe
+
+        async def mock_stream_completion(messages):
+            raise APIError(
+                message="Internal server error",
+                request=MagicMock(),
+                body=None,
+            )
+            yield  # Make it a generator
+
+        mock_llm = MagicMock()
+        mock_llm.stream_completion = mock_stream_completion
+
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_stt_service", lambda: mock_stt
+        )
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_llm_service", lambda: mock_llm
+        )
+
+        with client.websocket_connect("/api/v1/ws/chat") as websocket:
+            import numpy as np
+
+            websocket.send_text(json.dumps({"type": "vad.start", "timestamp": 1}))
+            audio = np.zeros(4000, dtype=np.float32)
+            websocket.send_bytes(self._create_audio_message(audio.tobytes()))
+            websocket.send_text(json.dumps({"type": "vad.end", "timestamp": 2}))
+
+            # Skip stt.final
+            websocket.receive_json()
+            # Skip llm.start
+            websocket.receive_json()
+
+            # Should receive error event
+            error_event = websocket.receive_json()
+            assert error_event["type"] == "error"
+            assert error_event["code"] == "LLM_API_ERROR"
+            assert "APIエラー" in error_event["message"]

@@ -3,7 +3,7 @@
 日本語特化ローカル音声対話アシスタント - ブラウザベースの音声インターフェースで AI と自然に会話できます。
 
 [![Release](https://img.shields.io/github/v/release/0h-n0/local-voice-assistant-claude-bmad)](https://github.com/0h-n0/local-voice-assistant-claude-bmad/releases)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 ## 概要
 
@@ -319,7 +319,13 @@ print(torch.cuda.is_available())
 
 ## ライセンス
 
-MIT License
+**AGPL-3.0 License**
+
+このプロジェクトは [Style-BERT-VITS2](https://github.com/litagin02/Style-Bert-VITS2) を使用しているため、AGPL-3.0 ライセンスが適用されます。
+
+- ソースコードの公開が必要
+- ネットワーク経由で使用する場合もソース公開が必要
+- 派生作品も AGPL-3.0 でライセンスする必要あり
 
 ## 謝辞
 

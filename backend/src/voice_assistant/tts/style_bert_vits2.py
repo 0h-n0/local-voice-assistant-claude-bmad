@@ -209,25 +209,24 @@ class StyleBertVits2TTS(BaseTTS):
             text=text,
         )
 
-        # Debug: Log audio statistics
-        logger.info(
-            "tts_audio_stats",
-            min_val=float(np.min(audio)),
-            max_val=float(np.max(audio)),
-            mean_val=float(np.mean(audio)),
-            dtype=str(audio.dtype),
-            shape=str(audio.shape),
-            sample_rate=sample_rate,
-        )
+        # Handle different audio formats from the model
+        # Style-BERT-VITS2 may return int16 or float32 depending on version
+        if audio.dtype == np.int16:
+            # Already in int16 format, use directly
+            audio_int16 = audio
+        elif audio.dtype in (np.float32, np.float64):
+            # Float format in range [-1, 1], convert to int16
+            # Normalize if outside [-1, 1] range
+            max_abs = np.abs(audio).max()
+            if max_abs > 1.0:
+                audio = audio / max_abs
+                logger.warning("tts_audio_normalized", max_abs=float(max_abs))
+            audio_int16 = (audio * 32767).astype(np.int16)
+        else:
+            # Unknown format, try to convert
+            logger.warning("tts_unknown_audio_dtype", dtype=str(audio.dtype))
+            audio_int16 = audio.astype(np.int16)
 
-        # Normalize audio to prevent clipping if outside [-1, 1]
-        max_abs = np.abs(audio).max()
-        if max_abs > 1.0:
-            audio = audio / max_abs
-            logger.warning("tts_audio_normalized", max_abs=float(max_abs))
-
-        # Convert float32 audio (-1.0 to 1.0) to PCM16 bytes
-        audio_int16 = (audio * 32767).astype(np.int16)
         audio_bytes = audio_int16.tobytes()
 
         latency_ms = (time.perf_counter() - start_time) * 1000

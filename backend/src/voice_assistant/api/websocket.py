@@ -125,6 +125,7 @@ async def handle_tts_streaming(
             client=client_info,
             text_length=len(sentence),
             audio_bytes=len(result.audio),
+            sample_rate=result.sample_rate,
             latency_ms=round(result.latency_ms, 2),
         )
 

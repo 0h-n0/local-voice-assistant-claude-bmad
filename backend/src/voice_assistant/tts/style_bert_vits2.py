@@ -209,6 +209,23 @@ class StyleBertVits2TTS(BaseTTS):
             text=text,
         )
 
+        # Debug: Log audio statistics
+        logger.info(
+            "tts_audio_stats",
+            min_val=float(np.min(audio)),
+            max_val=float(np.max(audio)),
+            mean_val=float(np.mean(audio)),
+            dtype=str(audio.dtype),
+            shape=str(audio.shape),
+            sample_rate=sample_rate,
+        )
+
+        # Normalize audio to prevent clipping if outside [-1, 1]
+        max_abs = np.abs(audio).max()
+        if max_abs > 1.0:
+            audio = audio / max_abs
+            logger.warning("tts_audio_normalized", max_abs=float(max_abs))
+
         # Convert float32 audio (-1.0 to 1.0) to PCM16 bytes
         audio_int16 = (audio * 32767).astype(np.int16)
         audio_bytes = audio_int16.tobytes()

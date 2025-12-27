@@ -3,9 +3,10 @@
 import asyncio
 import time
 
-# Workaround for ml_dtypes compatibility issue
+# Workaround for ml_dtypes compatibility issue (see Issue #16)
 # nemo-toolkit expects float4/float8 types which are only in ml_dtypes >= 0.5.0
 # but reazonspeech requires numpy < 2 which conflicts with ml_dtypes >= 0.5.0
+# https://github.com/0h-n0/local-voice-assistant-claude-bmad/issues/16
 import ml_dtypes
 _missing_types = [
     'float4_e2m1fn',

@@ -18,6 +18,7 @@ dependencies = [
     "reazonspeech-nemo-asr",
     "openai>=2.14.0",
     "httpx>=0.28.1",
+    "style-bert-vits2>=2.5.0",
 ]
 
 [project.optional-dependencies]

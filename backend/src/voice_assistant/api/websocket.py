@@ -1,5 +1,6 @@
 """WebSocket endpoint for real-time voice chat"""
 
+import base64
 import json
 import os
 import threading
@@ -11,6 +12,7 @@ from openai import APIError, AuthenticationError, RateLimitError
 from voice_assistant.core.logging import get_logger
 from voice_assistant.llm import ConversationContext, OpenAICompatLLM
 from voice_assistant.stt import ReazonSpeechSTT, get_stt_device
+from voice_assistant.tts import SentenceBuffer, StyleBertVits2TTS, get_tts_device
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -22,6 +24,10 @@ _stt_service_lock = threading.Lock()
 # Global LLM service instance (lazy loaded, thread-safe)
 _llm_service: OpenAICompatLLM | None = None
 _llm_service_lock = threading.Lock()
+
+# Global TTS service instance (lazy loaded, thread-safe)
+_tts_service: StyleBertVits2TTS | None = None
+_tts_service_lock = threading.Lock()
 
 
 def get_stt_service() -> ReazonSpeechSTT:
@@ -51,6 +57,74 @@ def get_llm_service() -> OpenAICompatLLM:
     return _llm_service
 
 
+def get_tts_service() -> StyleBertVits2TTS:
+    """Get or create the global TTS service instance (thread-safe)."""
+    global _tts_service
+    if _tts_service is None:
+        with _tts_service_lock:
+            # Double-check locking pattern
+            if _tts_service is None:
+                device = get_tts_device()
+                logger.info("initializing_tts_service", device=device)
+                _tts_service = StyleBertVits2TTS(device=device)
+    return _tts_service
+
+
+async def handle_tts_streaming(
+    websocket: WebSocket,
+    sentence: str,
+    client_info: str,
+    e2e_start_time: float | None = None,
+    is_first_chunk: bool = False,
+) -> float:
+    """Process a sentence with TTS and send audio chunks.
+
+    Args:
+        websocket: The WebSocket connection.
+        sentence: The sentence to synthesize.
+        client_info: Client identification string for logging.
+        e2e_start_time: Start time for E2E latency measurement (from vad.end).
+        is_first_chunk: Whether this is the first TTS chunk (for E2E latency logging).
+
+    Returns:
+        The TTS processing latency in milliseconds.
+    """
+    tts_service = get_tts_service()
+    result = await tts_service.synthesize(sentence)
+
+    if result.audio:
+        # Base64 encode the audio data for WebSocket transmission
+        audio_base64 = base64.b64encode(result.audio).decode("utf-8")
+
+        await websocket.send_json(
+            {
+                "type": "tts.chunk",
+                "audio": audio_base64,
+                "sampleRate": result.sample_rate,
+                "format": "pcm16",
+            }
+        )
+
+        # Log E2E latency for first TTS chunk (vad.end → first tts.chunk)
+        if is_first_chunk and e2e_start_time is not None:
+            e2e_latency_ms = (time.perf_counter() - e2e_start_time) * 1000
+            logger.info(
+                "e2e_first_chunk_latency",
+                client=client_info,
+                e2e_ms=round(e2e_latency_ms, 2),
+            )
+
+        logger.info(
+            "tts_chunk_sent",
+            client=client_info,
+            text_length=len(sentence),
+            audio_bytes=len(result.audio),
+            latency_ms=round(result.latency_ms, 2),
+        )
+
+    return result.latency_ms
+
+
 class AudioBuffer:
     """Buffer for accumulating audio chunks from VAD."""
 
@@ -77,14 +151,16 @@ async def handle_llm_completion(
     text: str,
     context: ConversationContext,
     client_info: str,
+    e2e_start_time: float | None = None,
 ) -> None:
-    """Handle LLM completion after STT with streaming response.
+    """Handle LLM completion after STT with streaming response and TTS.
 
     Args:
         websocket: The WebSocket connection.
         text: The transcribed text from STT.
         context: The conversation context for maintaining history.
         client_info: Client identification string for logging.
+        e2e_start_time: Start time for E2E latency measurement (from vad.end).
     """
     if not text.strip():
         logger.debug("llm_skip_empty_text", client=client_info)
@@ -103,12 +179,45 @@ async def handle_llm_completion(
         ttft: float | None = None
         full_response = ""
 
+        # Sentence buffer for TTS streaming
+        sentence_buffer = SentenceBuffer()
+        tts_total_latency = 0.0
+        is_first_tts_chunk = True  # Track first TTS chunk for E2E latency
+
         async for token in llm_service.stream_completion(context.get_messages()):
             if ttft is None:
                 ttft = (time.perf_counter() - start_time) * 1000
 
             full_response += token
             await websocket.send_json({"type": "llm.delta", "text": token})
+
+            # Buffer tokens and process complete sentences for TTS
+            sentences = sentence_buffer.add(token)
+            for sentence in sentences:
+                try:
+                    tts_latency = await handle_tts_streaming(
+                        websocket,
+                        sentence,
+                        client_info,
+                        e2e_start_time=e2e_start_time,
+                        is_first_chunk=is_first_tts_chunk,
+                    )
+                    is_first_tts_chunk = False  # Only first chunk gets E2E timing
+                    tts_total_latency += tts_latency
+                except Exception as e:
+                    logger.error(
+                        "tts_streaming_error",
+                        client=client_info,
+                        sentence=sentence[:50],
+                        error=str(e),
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "code": "TTS_ERROR",
+                            "message": "音声合成に失敗しました",
+                        }
+                    )
 
         latency_ms = (time.perf_counter() - start_time) * 1000
 
@@ -130,6 +239,41 @@ async def handle_llm_completion(
             response_length=len(full_response),
             latency_ms=round(latency_ms, 2),
             ttft_ms=round(ttft or 0, 2),
+        )
+
+        # Flush remaining text in sentence buffer for TTS
+        remaining = sentence_buffer.flush()
+        if remaining:
+            try:
+                tts_latency = await handle_tts_streaming(
+                    websocket,
+                    remaining,
+                    client_info,
+                    e2e_start_time=e2e_start_time,
+                    is_first_chunk=is_first_tts_chunk,
+                )
+                is_first_tts_chunk = False  # Mark as consumed
+                tts_total_latency += tts_latency
+            except Exception as e:
+                logger.error(
+                    "tts_flush_error",
+                    client=client_info,
+                    remaining=remaining[:50],
+                    error=str(e),
+                )
+
+        # Send tts.end event with total TTS latency
+        await websocket.send_json(
+            {
+                "type": "tts.end",
+                "latency_ms": round(tts_total_latency, 2),
+            }
+        )
+
+        logger.info(
+            "tts_completed",
+            client=client_info,
+            total_latency_ms=round(tts_total_latency, 2),
         )
 
     except RateLimitError:
@@ -188,6 +332,9 @@ async def handle_vad_end(
         logger.debug("vad_end_no_audio", client=client_info)
         return
 
+    # Record E2E start time for latency measurement
+    e2e_start_time = time.perf_counter()
+
     audio_data = audio_buffer.get_audio()
     sample_rate = audio_buffer.sample_rate
 
@@ -220,7 +367,9 @@ async def handle_vad_end(
 
         # Continue to LLM processing if we got text
         if result.text.strip():
-            await handle_llm_completion(websocket, result.text, context, client_info)
+            await handle_llm_completion(
+                websocket, result.text, context, client_info, e2e_start_time
+            )
 
     except Exception as e:
         logger.error(

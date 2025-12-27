@@ -76,6 +76,24 @@ export interface LlmEndEvent {
   ttft_ms: number;
 }
 
+// ============================================
+// TTS Events (Story 2.5)
+// ============================================
+
+/** TTS audio chunk */
+export interface TtsChunkEvent {
+  type: "tts.chunk";
+  audio: string; // base64 encoded PCM16 audio
+  sampleRate: number;
+  format: "pcm16";
+}
+
+/** TTS processing completed */
+export interface TtsEndEvent {
+  type: "tts.end";
+  latency_ms: number;
+}
+
 /** Union of all server-to-client events */
 export type ServerEvent =
   | SttPartialEvent
@@ -83,6 +101,8 @@ export type ServerEvent =
   | LlmStartEvent
   | LlmDeltaEvent
   | LlmEndEvent
+  | TtsChunkEvent
+  | TtsEndEvent
   | ErrorEvent;
 
 /** Recording state for UI */
@@ -140,6 +160,28 @@ export function parseServerEvent(data: unknown): ServerEvent | null {
       type: "llm.end",
       latency_ms: event.latency_ms,
       ttft_ms: event.ttft_ms,
+    };
+  }
+
+  // TTS events (Story 2.5)
+  if (
+    type === "tts.chunk" &&
+    typeof event.audio === "string" &&
+    typeof event.sampleRate === "number" &&
+    event.format === "pcm16"
+  ) {
+    return {
+      type: "tts.chunk",
+      audio: event.audio,
+      sampleRate: event.sampleRate,
+      format: "pcm16",
+    };
+  }
+
+  if (type === "tts.end" && typeof event.latency_ms === "number") {
+    return {
+      type: "tts.end",
+      latency_ms: event.latency_ms,
     };
   }
 

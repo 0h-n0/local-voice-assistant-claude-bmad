@@ -49,14 +49,14 @@ development_status:
   epic-1-retrospective: done
 
   # Epic 2: リアルタイム音声対話 (MVP核心)
-  epic-2: in-progress
+  epic-2: done
   2-1-websocket-foundation: done
   2-2-frontend-audio-capture-vad: done
   2-3-stt-integration-reazonspeech: done
   2-4-llm-integration-openai-compatible: done
-  2-5-tts-integration-style-bert-vits2: backlog
-  2-6-e2e-pipeline-integration: backlog
-  2-7-chat-ui-basic: backlog
+  2-5-tts-integration-style-bert-vits2: done
+  2-6-e2e-pipeline-integration: done
+  2-7-chat-ui-basic: done
   epic-2-retrospective: optional
 
   # Epic 3: 会話体験の完成

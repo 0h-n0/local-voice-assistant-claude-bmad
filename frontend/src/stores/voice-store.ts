@@ -8,6 +8,7 @@ import {
   WebSocketClient,
 } from "@/core/websocket-client";
 import { RecordingState, parseServerEvent } from "@/core/events";
+import { getAudioPlayer } from "@/core/audio-player";
 
 // WebSocket URL - configurable via environment variable
 const getWebSocketUrl = (): string => {
@@ -34,6 +35,9 @@ export interface LlmResult {
 /** Processing state for LLM (Story 2.4) */
 export type LlmState = "idle" | "processing" | "streaming";
 
+/** Processing state for TTS (Story 2.5) */
+export type TtsState = "idle" | "playing";
+
 interface VoiceStore {
   // State
   connectionState: ConnectionState;
@@ -50,6 +54,10 @@ interface VoiceStore {
   llmStreamingText: string;
   llmResults: LlmResult[];
 
+  // TTS state (Story 2.5)
+  ttsState: TtsState;
+  ttsLatencyMs: number | null;
+
   // Actions
   connect: () => void;
   disconnect: () => void;
@@ -57,6 +65,7 @@ interface VoiceStore {
   setRecordingState: (state: RecordingState) => void;
   clearSttResults: () => void;
   clearLlmResults: () => void;
+  stopTts: () => void;
 }
 
 export const useVoiceStore = create<VoiceStore>((set, get) => ({
@@ -73,6 +82,10 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
   llmStreamingText: "",
   llmResults: [],
 
+  // TTS initial state (Story 2.5)
+  ttsState: "idle",
+  ttsLatencyMs: null,
+
   // Actions
   setConnectionState: (state: ConnectionState) => {
     set({ connectionState: state });
@@ -88,6 +101,12 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
 
   clearLlmResults: () => {
     set({ llmResults: [], llmStreamingText: "", llmState: "idle" });
+  },
+
+  stopTts: () => {
+    const audioPlayer = getAudioPlayer();
+    audioPlayer.stop();
+    set({ ttsState: "idle" });
   },
 
   connect: () => {
@@ -167,6 +186,30 @@ export const useVoiceStore = create<VoiceStore>((set, get) => ({
               ],
               llmStreamingText: "",
             }));
+            break;
+
+          // TTS events (Story 2.5)
+          case "tts.chunk": {
+            const audioPlayer = getAudioPlayer();
+            // Resume AudioContext if suspended (browser autoplay policy)
+            audioPlayer.resume().catch(() => {
+              // Ignore resume errors
+            });
+            // Set callback to update state when all audio finishes playing
+            audioPlayer.onPlaybackComplete(() => {
+              set({ ttsState: "idle" });
+            });
+            // Enqueue audio chunk for playback
+            audioPlayer.enqueue(event.audio, event.sampleRate).catch(() => {
+              // Ignore decode errors
+            });
+            set({ ttsState: "playing" });
+            break;
+          }
+
+          case "tts.end":
+            // Only store latency - ttsState will be set to idle by AudioPlayer callback
+            set({ ttsLatencyMs: event.latency_ms });
             break;
         }
       },

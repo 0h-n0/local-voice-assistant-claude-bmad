@@ -312,8 +312,24 @@ class TestSttIntegration:
             "voice_assistant.api.websocket.get_llm_service", mock_get_llm_service
         )
 
-        def consume_llm_events(websocket):
-            """Consume LLM events (llm.start, llm.delta, llm.end)."""
+        # Mock TTS service
+        from voice_assistant.tts.base import TTSResult
+
+        async def mock_synthesize(text: str):
+            return TTSResult(audio=b"\x00\x01", sample_rate=44100, latency_ms=10.0)
+
+        mock_tts = MagicMock()
+        mock_tts.synthesize = mock_synthesize
+
+        def mock_get_tts_service():
+            return mock_tts
+
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_tts_service", mock_get_tts_service
+        )
+
+        def consume_llm_and_tts_events(websocket):
+            """Consume LLM events (llm.start, llm.delta, llm.end) and TTS events."""
             # llm.start
             event = websocket.receive_json()
             assert event["type"] == "llm.start"
@@ -323,6 +339,11 @@ class TestSttIntegration:
             # llm.end
             event = websocket.receive_json()
             assert event["type"] == "llm.end"
+            # tts.end (no sentence endings in "mock response", so only flush at end)
+            event = websocket.receive_json()
+            assert event["type"] == "tts.chunk"
+            event = websocket.receive_json()
+            assert event["type"] == "tts.end"
 
         with client.websocket_connect("/api/v1/ws/chat") as websocket:
             import numpy as np
@@ -335,7 +356,7 @@ class TestSttIntegration:
 
             response1 = websocket.receive_json()
             assert response1["text"] == "result 1"
-            consume_llm_events(websocket)
+            consume_llm_and_tts_events(websocket)
 
             # Second audio session (should have fresh buffer)
             websocket.send_text(json.dumps({"type": "vad.start", "timestamp": 3}))
@@ -345,7 +366,7 @@ class TestSttIntegration:
 
             response2 = websocket.receive_json()
             assert response2["text"] == "result 2"
-            consume_llm_events(websocket)
+            consume_llm_and_tts_events(websocket)
 
             # Verify audio lengths are different (buffer was cleared)
             assert len(audio_lengths) == 2
@@ -360,6 +381,29 @@ class TestLlmIntegration:
         header = json.dumps({"type": "vad.audio", "sampleRate": sample_rate}).encode()
         header_length = len(header).to_bytes(4, byteorder="little")
         return header_length + header + audio_data
+
+    def _mock_tts_service(self, monkeypatch):
+        """Set up mock TTS service for tests."""
+        from unittest.mock import MagicMock
+
+        from voice_assistant.tts.base import TTSResult
+
+        async def mock_synthesize(text: str):
+            return TTSResult(audio=b"\x00\x01", sample_rate=44100, latency_ms=10.0)
+
+        mock_tts = MagicMock()
+        mock_tts.synthesize = mock_synthesize
+
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_tts_service", lambda: mock_tts
+        )
+
+    def _consume_tts_events(self, websocket):
+        """Consume TTS events (tts.chunk, tts.end)."""
+        event = websocket.receive_json()
+        assert event["type"] == "tts.chunk"
+        event = websocket.receive_json()
+        assert event["type"] == "tts.end"
 
     def test_llm_events_after_stt(self, client: TestClient, monkeypatch):
         """Test LLM events are sent after STT processing."""
@@ -387,6 +431,7 @@ class TestLlmIntegration:
         monkeypatch.setattr(
             "voice_assistant.api.websocket.get_llm_service", lambda: mock_llm
         )
+        self._mock_tts_service(monkeypatch)
 
         with client.websocket_connect("/api/v1/ws/chat") as websocket:
             import numpy as np
@@ -421,6 +466,9 @@ class TestLlmIntegration:
             assert "latency_ms" in llm_end
             assert "ttft_ms" in llm_end
 
+            # Consume TTS events
+            self._consume_tts_events(websocket)
+
     def test_llm_end_contains_latency_metrics(self, client: TestClient, monkeypatch):
         """Test llm.end event contains required latency metrics."""
         from collections.abc import AsyncIterator
@@ -446,6 +494,7 @@ class TestLlmIntegration:
         monkeypatch.setattr(
             "voice_assistant.api.websocket.get_llm_service", lambda: mock_llm
         )
+        self._mock_tts_service(monkeypatch)
 
         with client.websocket_connect("/api/v1/ws/chat") as websocket:
             import numpy as np
@@ -469,6 +518,9 @@ class TestLlmIntegration:
             assert isinstance(llm_end["ttft_ms"], (int, float))
             assert llm_end["latency_ms"] >= 0
             assert llm_end["ttft_ms"] >= 0
+
+            # Consume TTS events
+            self._consume_tts_events(websocket)
 
     def test_conversation_context_maintained(self, client: TestClient, monkeypatch):
         """Test conversation context is maintained across turns."""
@@ -503,6 +555,7 @@ class TestLlmIntegration:
         monkeypatch.setattr(
             "voice_assistant.api.websocket.get_llm_service", lambda: mock_llm
         )
+        self._mock_tts_service(monkeypatch)
 
         def consume_all_events(websocket):
             """Consume all events for one turn."""
@@ -510,6 +563,8 @@ class TestLlmIntegration:
             websocket.receive_json()  # llm.start
             websocket.receive_json()  # llm.delta
             websocket.receive_json()  # llm.end
+            websocket.receive_json()  # tts.chunk
+            websocket.receive_json()  # tts.end
 
         with client.websocket_connect("/api/v1/ws/chat") as websocket:
             import numpy as np
@@ -737,3 +792,132 @@ class TestLlmIntegration:
             assert error_event["type"] == "error"
             assert error_event["code"] == "LLM_API_ERROR"
             assert "APIエラー" in error_event["message"]
+
+
+class TestE2ELatency:
+    """Tests for E2E latency measurement (Story 2.6)."""
+
+    def _create_audio_message(self, audio_data: bytes, sample_rate: int = 16000) -> bytes:
+        """Create binary audio message with header."""
+        header = json.dumps({"type": "vad.audio", "sampleRate": sample_rate}).encode()
+        header_length = len(header).to_bytes(4, byteorder="little")
+        return header_length + header + audio_data
+
+    def _mock_tts_service(self, monkeypatch):
+        """Set up mock TTS service for tests."""
+        from unittest.mock import MagicMock
+
+        from voice_assistant.tts.base import TTSResult
+
+        async def mock_synthesize(text: str):
+            return TTSResult(audio=b"\x00\x01", sample_rate=44100, latency_ms=10.0)
+
+        mock_tts = MagicMock()
+        mock_tts.synthesize = mock_synthesize
+
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_tts_service", lambda: mock_tts
+        )
+
+    def test_e2e_latency_logged(self, client: TestClient, monkeypatch, capsys):
+        """Test E2E latency is logged from vad.end to first tts.chunk."""
+        from collections.abc import AsyncIterator
+        from unittest.mock import MagicMock
+
+        from voice_assistant.stt import TranscriptionResult
+
+        async def mock_transcribe(audio_data: bytes, sample_rate: int):
+            return TranscriptionResult(text="こんにちは", latency_ms=100.0)
+
+        mock_stt = MagicMock()
+        mock_stt.transcribe = mock_transcribe
+
+        async def mock_stream_completion(messages) -> AsyncIterator[str]:
+            yield "Hello。"  # Include sentence ending for TTS
+
+        mock_llm = MagicMock()
+        mock_llm.stream_completion = mock_stream_completion
+
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_stt_service", lambda: mock_stt
+        )
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_llm_service", lambda: mock_llm
+        )
+        self._mock_tts_service(monkeypatch)
+
+        with client.websocket_connect("/api/v1/ws/chat") as websocket:
+            import numpy as np
+
+            websocket.send_text(json.dumps({"type": "vad.start", "timestamp": 1}))
+            audio = np.zeros(4000, dtype=np.float32)
+            websocket.send_bytes(self._create_audio_message(audio.tobytes()))
+            websocket.send_text(json.dumps({"type": "vad.end", "timestamp": 2}))
+
+            # Consume all events
+            websocket.receive_json()  # stt.final
+            websocket.receive_json()  # llm.start
+            websocket.receive_json()  # llm.delta
+            websocket.receive_json()  # tts.chunk
+            websocket.receive_json()  # llm.end
+            websocket.receive_json()  # tts.end
+
+        # Check that e2e_latency was logged (structlog logs to stdout)
+        captured = capsys.readouterr()
+        assert "e2e_first_chunk_latency" in captured.out
+
+    def test_e2e_event_sequence(self, client: TestClient, monkeypatch):
+        """Test complete E2E event sequence: stt.final → llm.start → llm.delta → tts.chunk → llm.end → tts.end."""
+        from collections.abc import AsyncIterator
+        from unittest.mock import MagicMock
+
+        from voice_assistant.stt import TranscriptionResult
+
+        async def mock_transcribe(audio_data: bytes, sample_rate: int):
+            return TranscriptionResult(text="テスト", latency_ms=50.0)
+
+        mock_stt = MagicMock()
+        mock_stt.transcribe = mock_transcribe
+
+        async def mock_stream_completion(messages) -> AsyncIterator[str]:
+            yield "応答。"
+
+        mock_llm = MagicMock()
+        mock_llm.stream_completion = mock_stream_completion
+
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_stt_service", lambda: mock_stt
+        )
+        monkeypatch.setattr(
+            "voice_assistant.api.websocket.get_llm_service", lambda: mock_llm
+        )
+        self._mock_tts_service(monkeypatch)
+
+        with client.websocket_connect("/api/v1/ws/chat") as websocket:
+            import numpy as np
+
+            websocket.send_text(json.dumps({"type": "vad.start", "timestamp": 1}))
+            audio = np.zeros(4000, dtype=np.float32)
+            websocket.send_bytes(self._create_audio_message(audio.tobytes()))
+            websocket.send_text(json.dumps({"type": "vad.end", "timestamp": 2}))
+
+            # Verify complete E2E sequence
+            events = []
+            # Collect all events
+            events.append(websocket.receive_json())  # stt.final
+            events.append(websocket.receive_json())  # llm.start
+            events.append(websocket.receive_json())  # llm.delta
+            events.append(websocket.receive_json())  # tts.chunk (from sentence ending)
+            events.append(websocket.receive_json())  # llm.end
+            events.append(websocket.receive_json())  # tts.end
+
+            # Verify event types in order
+            event_types = [e["type"] for e in events]
+            assert event_types == [
+                "stt.final",
+                "llm.start",
+                "llm.delta",
+                "tts.chunk",
+                "llm.end",
+                "tts.end",
+            ]

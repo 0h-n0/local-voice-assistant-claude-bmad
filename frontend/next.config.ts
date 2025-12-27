@@ -15,7 +15,7 @@ const nextConfig: NextConfig = {
 
     return config;
   },
-  // Allow loading WASM files
+  // Allow loading WASM files and enable SharedArrayBuffer
   async headers() {
     return [
       {
@@ -24,6 +24,19 @@ const nextConfig: NextConfig = {
           {
             key: "Content-Type",
             value: "application/wasm",
+          },
+        ],
+      },
+      {
+        source: "/:path*",
+        headers: [
+          {
+            key: "Cross-Origin-Opener-Policy",
+            value: "same-origin",
+          },
+          {
+            key: "Cross-Origin-Embedder-Policy",
+            value: "require-corp",
           },
         ],
       },

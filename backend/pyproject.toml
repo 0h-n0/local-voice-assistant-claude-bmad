@@ -19,6 +19,7 @@ dependencies = [
     "openai>=2.14.0",
     "httpx>=0.28.1",
     "style-bert-vits2>=2.5.0",
+    "pyarrow>=14.0.0,<15.0.0",
 ]
 
 [project.optional-dependencies]
